@@ -73,6 +73,11 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["S", "T20"]
 "tests/**" = ["S", "T20"]
+# CLI entry points: stdout IS the interface, so T20 does not apply.
+"**/migrate.py" = ["T20"]
+"**/admin.py" = ["T20"]
+"**/seed.py" = ["T20"]
+"**/__main__.py" = ["T20"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Header"]

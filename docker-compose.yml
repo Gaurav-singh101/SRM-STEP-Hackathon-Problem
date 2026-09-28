@@ -44,11 +44,48 @@ services:
       KAFKA_NUM_PARTITIONS: 24
       KAFKA_LOG_RETENTION_HOURS: 24
       CLUSTER_ID: fleet-intel-local-cluster
+      # The local Docker VM has ~3.9 GB total for four datastores, so the broker
+      # is capped well below its default heap. Cloud values live in Helm values,
+      # not here (CLAUDE.md S13).
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms512m"
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 >/dev/null 2>&1"]
       <<: *hc
     volumes:
       - kafka-data:/var/lib/kafka/data
+
+  # --- Topic creation (ADR-0004) ------------------------------------------
+  # Runs as an init container rather than a host script so `up` needs no Kafka
+  # client on the developer machine. On this Windows host the confluent-kafka
+  # native library is blocked by Application Control (blocker B2), and CI should
+  # not depend on host tooling either. Idempotent: --if-not-exists, so re-running
+  # `up` is safe.
+  kafka-init:
+    image: apache/kafka:3.9.0
+    container_name: fleet-kafka-init
+    profiles: [core]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        BOOT=kafka:19092
+        create() {
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$$BOOT"             --create --if-not-exists --topic "$$1"             --partitions "$$2" --replication-factor 1             --config retention.ms="$$3" $${4:-}
+        }
+        # Partition counts from ADR-0004. telemetry.raw uses 24 because it
+        # divides by 2/3/4/6/8/12, so consumer count scales without a
+        # repartition. The side topics are low volume and need far fewer.
+        create telemetry.raw   24 86400000
+        create telemetry.dlq    6 604800000   # kept 7 days: these need triage
+        create telemetry.late   6 604800000   # reconciled by the batch job
+        create idle.events     12 604800000
+        create alerts           6 604800000
+        echo "--- topics ---"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$$BOOT" --list
 
   # --- PostgreSQL: relational core, 3NF + rollups (CLAUDE.md S8) ----------
   postgres:
@@ -56,7 +93,12 @@ services:
     container_name: fleet-postgres
     profiles: [core]
     ports:
-      - "5432:5432"
+      # Published on 55432 by default, not 5432. A locally installed PostgreSQL
+      # service commonly already owns 5432, and on Windows the published port can
+      # still bind while connections silently reach the native server instead -
+      # which looks exactly like a wrong password. The container port is unchanged,
+      # so service-to-service connections inside the compose network still use 5432.
+      - "${POSTGRES_HOST_PORT:-55432}:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-fleet}
       POSTGRES_USER: ${POSTGRES_USER:-fleet}

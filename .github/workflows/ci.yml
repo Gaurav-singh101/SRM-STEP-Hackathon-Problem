@@ -129,9 +129,6 @@ jobs:
     name: Integration (Testcontainers)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # Enabled once the adapters land (Day 2). Kept here so the pipeline shape is
-    # visible and reviewable rather than appearing at the last minute.
-    if: false
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -139,5 +136,6 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv sync --all-packages --frozen
-      - name: Integration tests against real Kafka, Postgres, Mongo, Redis
+      # ubuntu runners ship a Docker daemon, so Testcontainers works unchanged.
+      - name: Integration tests against real infrastructure
         run: uv run pytest -m integration -v
