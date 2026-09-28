@@ -1,0 +1,143 @@
+# ---------------------------------------------------------------------------
+# CI on every push (hackathon PDF S12: "All suites should run automatically in
+# CI on every push"). Fails on lint, type or coverage regressions.
+# ---------------------------------------------------------------------------
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push supersedes an in-flight run on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pinned so a toolchain update cannot silently change results (CLAUDE.md S9:
+  # every measurement records its configuration).
+  UV_VERSION: "0.12.4"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  quality:
+    name: Lint, types and unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Sync the pinned workspace
+        run: uv sync --all-packages --frozen
+
+      - name: Ruff lint
+        run: uv run ruff check --output-format=github .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: mypy (strict on libs and domain)
+        run: uv run mypy
+
+      - name: Unit tests with coverage gate
+        # Gate scope is libs + domain + application (ruling G7); adapters are
+        # measured but report-only so the gate cannot be gamed.
+        run: |
+          mkdir -p docs/evidence/coverage
+          uv run pytest -m "not integration" \
+            --cov --cov-report=term-missing \
+            --cov-report=xml:docs/evidence/coverage/coverage.xml \
+            --cov-fail-under=80
+
+      - name: Upload coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.sha }}
+          path: docs/evidence/coverage/
+          if-no-files-found: warn
+
+  contract:
+    name: Event contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - run: uv sync --all-packages --frozen
+
+      # Runs on its own so a contract break is unmistakable in the run summary:
+      # it means producer and consumer no longer agree on the wire format.
+      - name: Schema contract tests
+        run: uv run pytest libs/fleet_common/tests/test_contract_schema.py -v
+
+  security:
+    name: Security scans
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Semgrep SAST
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/default
+            p/python
+            p/secrets
+        continue-on-error: true
+
+      - name: Trivy filesystem and secret scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln,secret,misconfig
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH
+        continue-on-error: true
+
+      - name: Upload scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scans-${{ github.sha }}
+          path: "*.sarif"
+          if-no-files-found: warn
+
+  integration:
+    name: Integration (Testcontainers)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Enabled once the adapters land (Day 2). Kept here so the pipeline shape is
+    # visible and reviewable rather than appearing at the last minute.
+    if: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --all-packages --frozen
+      - name: Integration tests against real Kafka, Postgres, Mongo, Redis
+        run: uv run pytest -m integration -v

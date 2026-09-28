@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fleet-intel.local/schemas/telemetry.raw.v1.json",
+  "title": "TelemetryEvent",
+  "description": "Canonical vehicle telemetry event, schema_version 1. SINGLE source of truth for the event contract (CLAUDE.md S7): simulator, processor, API and tests all validate against this file. Extends the illustrative event in the hackathon PDF S8, which lacks the ignition/engine/fuel signals that idle detection requires (D7).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "tenant_id",
+    "vin",
+    "seq",
+    "ts",
+    "speed_kph",
+    "odometer_km",
+    "ignition"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Contract version. Bumping this requires a migration plus a contract test update (CLAUDE.md S17)."
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUIDv7: time-ordered, so it indexes well as a unique key in the sink. Final dedup safety net (G10)."
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Owning tenant. NEVER trusted from an API request body; on the ingest path it is device-bound (CLAUDE.md S3)."
+    },
+    "device_id": {
+      "type": ["string", "null"],
+      "maxLength": 64,
+      "description": "Reporting device/OEM-cloud connection id."
+    },
+    "vin": {
+      "type": "string",
+      "pattern": "^[A-HJ-NPR-Z0-9]{17}$",
+      "description": "17 characters, excludes I/O/Q. Check digit validated in code, not expressible in JSON Schema (PDF S9)."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615,
+      "description": "Monotonic per-VIN sequence. Enables an O(1) per-vehicle high-water-mark dedup that scales to 100K events/s without one key per event (CLAUDE.md S8, G10)."
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "EVENT time, UTC RFC3339 with milliseconds. All business logic uses this, never processing time (CLAUDE.md S8)."
+    },
+    "speed_kph": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 300,
+      "description": "Ground speed. Above the maximum the event is rejected to the DLQ as physically impossible."
+    },
+    "odometer_km": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 5000000,
+      "description": "Cumulative distance, expected monotonic per VIN; a decrease is a data-quality signal."
+    },
+    "heading_deg": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "exclusiveMaximum": 360
+    },
+    "ignition": {
+      "type": "string",
+      "enum": ["off", "accessory", "on", "cranking"],
+      "description": "Authoritative engine-power state used by idle detection together with speed_kph (D1)."
+    },
+    "engine_state": {
+      "type": ["string", "null"],
+      "enum": ["off", "idling", "running", null],
+      "description": "Device-reported state. Treated as a HINT only: OEMs compute it inconsistently, so our own idle logic derives state from ignition + speed and stays testable (D7)."
+    },
+    "rpm": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "engine_hours": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 200000
+    },
+    "fuel_level_pct": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Tank level. Coarse (~1% resolution), so it is a cross-check, not the primary fuel source (D2)."
+    },
+    "fuel_rate_lph": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 200,
+      "description": "Instantaneous consumption. When present, drives the secondary measured-fuel cross-check (D2)."
+    },
+    "soc_pct": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Battery state of charge, EV/hybrid only. Powertrain itself lives on the vehicle master, not on every event, to avoid a second source of truth and save bytes at 100K/s (D7/D9)."
+    },
+    "lat": {
+      "type": ["number", "null"],
+      "minimum": -90,
+      "maximum": 90,
+      "description": "Precise coordinates are NEVER written to logs and are masked for roles that do not need them (CLAUDE.md S11)."
+    },
+    "lon": {
+      "type": ["number", "null"],
+      "minimum": -180,
+      "maximum": 180
+    },
+    "gps_valid": {
+      "type": ["boolean", "null"],
+      "description": "False marks an untrustworthy fix; idle segmentation must not split a segment on a bad fix (D1 gap tolerance)."
+    },
+    "hdop": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 50
+    },
+    "dtc": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "pattern": "^[PBCU][0-3][0-9A-F]{3}$" },
+      "maxItems": 32,
+      "description": "OBD-II fault codes, e.g. P0301 (PDF S9 parsing requirement)."
+    },
+    "evt": {
+      "type": ["string", "null"],
+      "enum": ["IGNITION_ON", "IGNITION_OFF", "HARSH_BRAKE", "HARSH_ACCEL", "PTO_ON", "PTO_OFF", "TRIP_START", "TRIP_END", null],
+      "description": "Discrete event marker, when the device emits one."
+    },
+    "pto_active": {
+      "type": ["boolean", "null"],
+      "description": "Power take-off (refrigeration unit, crane, lift) engaged. Optional idle exclusion, default off (D1)."
+    }
+  }
+}

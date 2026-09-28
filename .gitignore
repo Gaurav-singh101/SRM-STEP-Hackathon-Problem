@@ -1,0 +1,50 @@
+# Secrets and local config (CLAUDE.md S3: never commit .env)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ...but committed evidence is a deliverable (CLAUDE.md S15), so keep it.
+!docs/evidence/**
+
+# Node / web
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Generated data files (CLAUDE.md S3: never commit generated data)
+data/
+*.parquet
+seed_output/
+
+# Terraform state (CLAUDE.md S3: never commit Terraform state)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+
+# Build / tooling output
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/

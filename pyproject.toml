@@ -1,0 +1,145 @@
+# ---------------------------------------------------------------------------
+# uv workspace root. One pinned lockfile for every Python package (CLAUDE.md S4).
+# This root is a virtual project: it owns tooling config, not shipped code.
+# ---------------------------------------------------------------------------
+[project]
+name = "fleet-intel"
+version = "0.1.0"
+description = "Fleet Fuel, Idling & Utilisation Cost Intelligence Platform"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fleet-common",
+    "fleet-simulator",
+    "fleet-processor",
+    "fleet-api",
+    "fleet-batch",
+]
+
+[tool.uv.workspace]
+members = ["libs/fleet_common", "services/simulator", "services/processor", "services/api", "services/batch"]
+
+[tool.uv.sources]
+fleet-common = { workspace = true }
+fleet-simulator = { workspace = true }
+fleet-processor = { workspace = true }
+fleet-api = { workspace = true }
+fleet-batch = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "pytest-asyncio>=0.25",
+    "hypothesis>=6.122",          # property-based tests for algorithms (CLAUDE.md S12)
+    "testcontainers>=4.9",        # real Kafka/PG/Mongo/Redis in integration tests
+    "ruff>=0.8",
+    "mypy>=1.14",
+    "behave>=1.2.6",              # BDD acceptance scenarios
+    "pyyaml>=6.0",                # compose/helm validation in tests
+    "types-pyyaml>=6.0",
+    "httpx>=0.28",                # FastAPI TestClient transport
+    "jsonschema>=4.23",           # validates events against schemas/ (contract tests, G9)
+]
+
+# --- ruff: lint + format (CLAUDE.md S4) -----------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["libs/fleet_common", "services/simulator", "services/processor", "services/api", "services/batch"]
+extend-exclude = ["docs/source", ".venv"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # import sorting
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "A",         # builtin shadowing
+    "C4",        # comprehensions
+    "DTZ",       # naive-datetime misuse: event time must be tz-aware (CLAUDE.md S8)
+    "T20",       # no print() in shipped code
+    "SIM",       # simplify
+    "PTH",       # pathlib
+    "RUF",
+    "ASYNC",     # blocking calls in async code (CLAUDE.md S9)
+    "S",         # bandit security rules
+]
+ignore = [
+    "S101",      # assert: allowed, pytest relies on it
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S", "T20"]
+"tests/**" = ["S", "T20"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Header"]
+
+# --- mypy: strict on libs and domain code (CLAUDE.md S4/S7) --------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+warn_return_any = true
+disallow_any_generics = true
+no_implicit_reexport = true
+show_error_codes = true
+pretty = true
+files = [
+    "libs/fleet_common/fleet_common",
+    "services/simulator/simulator",
+    "services/processor/processor",
+    "services/api/api",
+    "services/batch/batch",
+]
+
+[[tool.mypy.overrides]]
+# Third-party packages without bundled type stubs.
+module = ["confluent_kafka.*", "testcontainers.*", "behave.*"]
+ignore_missing_imports = true
+
+# --- pytest ---------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = [
+    "libs/fleet_common/tests",
+    "services/simulator/tests",
+    "services/processor/tests",
+    "services/api/tests",
+    "services/batch/tests",
+    "tests",
+]
+asyncio_mode = "auto"
+addopts = "-q --strict-markers --strict-config"
+markers = [
+    "integration: needs real infrastructure via Testcontainers (deselect with -m 'not integration')",
+    "slow: long-running (load/soak)",
+]
+filterwarnings = ["error::DeprecationWarning"]
+
+# --- coverage -------------------------------------------------------------
+# G7 ruling (approved): 80% gate on libs + domain + application only.
+# Adapters are measured but report-only, so the gate cannot be gamed by
+# padding tests against infrastructure glue.
+[tool.coverage.run]
+branch = true
+source = [
+    "libs/fleet_common/fleet_common",
+    "services/simulator/simulator",
+    "services/processor/processor",
+    "services/api/api",
+    "services/batch/batch",
+]
+omit = ["*/tests/*", "*/__main__.py"]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@abstractmethod",
+]

@@ -1,0 +1,82 @@
+# AI tools and open-source declaration
+
+Required by the hackathon PDF S14 ("Open source and AI tools: allowed, but must
+be declared") and S16 of the solution document template.
+
+## AI assistance
+
+| Tool | Used for | Developer review |
+|---|---|---|
+| Claude (Anthropic), via Claude Code | Source-document analysis; proposing options and trade-offs for decisions D1-D11; scaffolding the repository; drafting domain logic, tests, ADRs and configuration | Every decision was proposed with alternatives and **approved by the developer** before implementation. The developer owns and can explain all architecture and code. |
+
+### What the assistance actually consisted of
+
+- **Analysis, not invention.** The hackathon PDF, `01_PROJECT_OVERVIEW` and
+  `02_PROBLEM_STATEMENT` were read and cross-checked for conflicts and gaps
+  before any code was written. Twelve gaps were reported rather than silently
+  resolved (recorded in the session transcript and `docs/OPEN_DECISIONS.md`).
+- **Options, then a decision.** For each of D1-D11, two or three options were
+  presented with trade-offs and a recommendation. Nothing was coded as final
+  until the developer answered, and each answer is recorded as an ADR.
+- **Findings from testing, not from assertion.** The MAD floor in ADR-0003 exists
+  because a test failed and exposed a real false-positive problem. The VIN check
+  digit was validated against external oracles, including the PDF's own example
+  VIN, rather than assumed correct.
+
+### Boundaries observed
+
+- No performance, coverage or accuracy figure appears anywhere unless it came
+  from a real run. The coverage figure (95.63%) is from `pytest --cov`; no
+  throughput figure exists yet and ADR-0005 says so explicitly.
+- All data is synthetic. No real personal, vehicle-owner or real VIN data is used.
+- No secrets in the repository; `.env.example` holds placeholders only.
+- ML and agentic-AI features are **out of scope by deliberate decision**
+  (CLAUDE.md S18). Section 11 of the solution document will state this with its
+  reasoning rather than being left blank. The anomaly detection in ADR-0003 is
+  statistical (median/MAD), and is described as such, not as machine learning.
+
+## Open-source components
+
+Licences as published by each project. An SBOM will accompany the submission.
+
+### Runtime - Python
+
+| Package | Licence | Why |
+|---|---|---|
+| pydantic, pydantic-settings | MIT | Event contract validation; config from environment only |
+| orjson | Apache-2.0 / MIT | Fast JSON in the hot path |
+| structlog | Apache-2.0 / MIT | Structured JSON logs with correlation ids |
+| pyjwt[crypto] | MIT | OIDC/JWT validation via JWKS |
+| httpx | BSD-3-Clause | Async HTTP with timeouts |
+| prometheus-client | Apache-2.0 | Metrics: events/s, lag, latency histograms |
+| confluent-kafka | Apache-2.0 | librdkafka Kafka client (ADR-0005) |
+| numpy | BSD-3-Clause | Vectorised event generation in the simulator |
+| psycopg[binary,pool] | LGPL-3.0 | Postgres driver with batched writes |
+| pymongo | Apache-2.0 | MongoDB driver |
+| redis | MIT | Redis client |
+| fastapi | MIT | API framework |
+| uvicorn | BSD-3-Clause | ASGI server |
+
+### Infrastructure
+
+| Component | Licence | Note |
+|---|---|---|
+| Apache Kafka | Apache-2.0 | KRaft mode, no ZooKeeper |
+| PostgreSQL 16 | PostgreSQL Licence | Relational core |
+| MongoDB 7.0 | SSPL-1.0 | Raw telemetry, used unmodified as a service |
+| **Redis 7.2.x** | **BSD-3-Clause** | **Pinned deliberately.** Redis changed licence at 7.4 (RSALv2/SSPL). Redis 8 later returned to AGPLv3, but 7.2.x is retained as the conservative BSD choice. Do not bump without an ADR. Trade-off: no security patches after 7.2 EOL; Valkey (BSD) is the drop-in alternative if that becomes pressing. |
+
+### Development and CI
+
+| Tool | Licence | Why |
+|---|---|---|
+| uv | Apache-2.0 / MIT | Pinned lockfile, reproducible installs |
+| ruff | MIT | Lint and format |
+| mypy | MIT | Strict typing on libs and domain |
+| pytest, pytest-cov, pytest-asyncio | MIT | Test runner and coverage |
+| hypothesis | MPL-2.0 | Property-based tests for algorithms |
+| testcontainers | Apache-2.0 | Real infrastructure in integration tests |
+| jsonschema | MIT | Validates events against `schemas/` |
+| behave | BSD-2-Clause | BDD acceptance scenarios |
+| Semgrep | LGPL-2.1 | SAST |
+| Trivy | Apache-2.0 | Dependency, secret and image scanning |
