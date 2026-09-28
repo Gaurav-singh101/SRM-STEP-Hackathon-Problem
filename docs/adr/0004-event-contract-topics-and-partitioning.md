@@ -57,11 +57,22 @@ divisible by 2, 3, 4, 6, 8 and 12, so consumer count can scale without
 repartitioning. Locally replication factor 1; in cloud 3 with
 `min.insync.replicas=2` and an idempotent producer at `acks=all`.
 
-**Capacity.** The PDF's S4 model assumes ~1 KB/event, giving ~8.6 TB/day and ~3
-PB/year at 100K events/s. Our compact JSON measures roughly 250-300 B/event, so
-our own projection is ~2.2-2.6 TB/day. Both figures are reported in the solution
-document: the PDF's for the problem framing, ours for this system. Either way the
-hot tier needs aggressive TTL (48 h in Mongo by default), not week-long retention.
+**Capacity.** The PDF's S4 reference model assumes ~1 KB/event, giving ~8.8 TB/day
+at 100K events/s.
+
+Our own wire format has now been **measured**, not estimated: 479 bytes/event mean
+over 275,202 generated events (median 480, p95 483 - the distribution is tight
+because the field set is fixed). At 100K events/s that is **47.9 MB/s, or 4.14
+TB/day**.
+
+> An earlier draft of this ADR estimated 250-300 B/event and 2.2-2.6 TB/day. That
+> estimate was wrong by roughly 60%, and is corrected here from the measurement.
+> Evidence: `docs/evidence/load/event-size.md`.
+
+Both figures belong in the solution document: the PDF's for framing the problem,
+ours for describing this system. Either way the conclusion is the same and it is
+the one that matters - the hot tier needs aggressive TTL (48 h in Mongo by
+default), not week-long retention.
 
 ## Consequences
 

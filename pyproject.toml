@@ -78,6 +78,8 @@ ignore = [
 "**/admin.py" = ["T20"]
 "**/seed.py" = ["T20"]
 "**/__main__.py" = ["T20"]
+# Evidence generators: stdout is the interface, and they embed markdown tables.
+"**/tools/*.py" = ["T20", "E501"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Header"]
@@ -137,7 +139,17 @@ source = [
     "services/api/api",
     "services/batch/batch",
 ]
-omit = ["*/tests/*", "*/__main__.py"]
+omit = [
+    "*/tests/*",
+    # Ruling G7: the gate covers libs + domain + application. Adapters, CLI entry
+    # points and evidence generators are measured in the report but excluded from
+    # the gate, so it cannot be satisfied by testing infrastructure glue instead of
+    # business rules. Adapters are covered behaviourally by the integration suite.
+    "*/adapters/*",
+    "*/__main__.py",
+    "*/tools/*",
+    "*/migrate.py",
+]
 
 [tool.coverage.report]
 precision = 2
