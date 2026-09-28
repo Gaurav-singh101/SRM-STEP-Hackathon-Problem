@@ -63,7 +63,14 @@ claim may appear anywhere in the repository or the solution document.
 - Back-pressure must be explicit: bounded queues, pause/resume on partitions.
 - Offsets commit only after a batch persists, giving at-least-once delivery with
   idempotent writes.
-- **Windows note:** `confluent-kafka` imports a native library that Windows
-  Application Control blocks on this machine. The processor runs in a Linux
-  container, where this does not apply; the Kafka adapter is imported lazily so
-  pure unit tests never load the DLL. Recorded as blocker B2 in `docs/PROGRESS.md`.
+- **Windows note (resolved):** `confluent-kafka` imports a native library that
+  Windows Application Control blocks on the development machine. Confirmed working
+  inside the Linux service image (librdkafka 2.15.1, running as uid 10001), and the
+  Kafka adapter is imported lazily so unit tests and `--dry-run` still work
+  natively. Blocker B2 in `docs/PROGRESS.md`.
+- **First measurement (producer side).** One producer process sustains 23,697
+  events/s including generation, 44,929 events/s generating alone, with 305,745 of
+  305,745 messages acknowledged and zero loss. Reaching 100K events/s on the
+  producer side therefore needs about 4-5 processes, which is ordinary horizontal
+  scaling. Evidence: `docs/evidence/load/simulator-produce-local.md`. The consumer
+  side remains unmeasured, so this ADR stays **provisional**.

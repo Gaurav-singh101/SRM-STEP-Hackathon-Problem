@@ -4,6 +4,88 @@ Session handoff record (CLAUDE.md S17). Newest first.
 
 ---
 
+## 2026-09-29 - Day 1 continued: live stack, schema and simulator
+
+Docker was installed by the developer, unblocking B1. Everything below runs against
+real infrastructure.
+
+### Done and verified
+
+| Area | State | Evidence |
+|---|---|---|
+| Local stack | All four stores healthy on first run | Kafka 3.9.0, PostgreSQL 16.15, MongoDB 7.0.43, Redis 7.2.16 |
+| Topics | 5 topics, partition counts per ADR-0004 | `telemetry.raw` 24, `idle.events` 12, side topics 6 |
+| Schema | 37 tables, 4 migrations applied | 3 partitioned parents, 5 partitions each |
+| Tenant isolation | RLS on 17 tables, ENABLE + FORCE | 18 integration tests incl. leakage attempts |
+| Simulator roster | 100K vehicles in 0.89s, unique valid VINs | benchmarked locally |
+| Simulator journeys | Trips, idle, and all five injected fault types | ground-truth `DaySummary` |
+| Container image | Multi-stage, non-root uid 10001, schema shipped | `fleet/simulator:dev` builds and runs |
+| Produce to Kafka | **305,745 enqueued, 305,745 acknowledged, 0 failed** | `docs/evidence/load/simulator-produce-local.md` |
+| Event size | **479 B/event** measured over 275,202 events | `docs/evidence/load/event-size.md` |
+| Partition balance | Hottest partition 1.042x mean at 100K vehicles | `docs/evidence/load/partition-balance.md` |
+
+**Test status:** 311 passed (293 unit, 18 integration), **96.23% coverage**, gate 80%.
+Lint, format and `mypy --strict` clean. Run: `./make.ps1 verify`.
+
+### Findings worth keeping
+
+- **`docker compose up` succeeded while Postgres connections silently failed.** A
+  native PostgreSQL 17 service on this machine owns port 5432; on Windows the
+  published port still binds, but host connections reach the native server. It
+  presents as a wrong password. The container now publishes 55432, and the native
+  service was left alone.
+- **Superusers bypass RLS unconditionally.** `FORCE ROW LEVEL SECURITY` closes the
+  table-owner gap, not the superuser one, so the policies only bite if the app does
+  `SET ROLE fleet_app`. Found by a `DELETE` that reached both tenants in a test.
+  Recorded in ADR-0006, with two tests asserting the bypass so it cannot surprise us.
+- **A pydantic `computed_field` leaked the database password.** `PostgresSettings.dsn`
+  was a computed field, which pydantic includes in `repr()` and `model_dump()`, so the
+  password reached any log line touching the settings object. Now a plain property.
+- **A UNIQUE index on a partitioned table must include the partition key.** That
+  would have defeated the alert-suppression constraint, so `alerts` is deliberately
+  not partitioned - alerts are low volume and a database-enforced guarantee against
+  alert storms is worth more than partition pruning.
+- **ADR-0004's event-size estimate was ~60% too low.** Estimated 250-300 B/event;
+  measured 479 B. Corrected in the ADR from the measurement.
+- **Partition imbalance at small N is expected, not a defect.** At 200 vehicles the
+  hottest partition held 5x the keys of the quietest. Modelling librdkafka's
+  `crc32 % partitions` reproduced the broker's assignment exactly, and the validated
+  model projects 1.042x the mean at 100K vehicles. Relative imbalance decays as
+  1/sqrt(N).
+- **A "too slow" reading was a measurement artefact.** Fleet generation looked like
+  1 ms/vehicle until profiling showed 0.023 s of the timed region was numpy's
+  one-time lazy import of `numpy.random`. Real cost is ~9 us/vehicle.
+
+### Blockers
+
+| # | Blocker | State |
+|---|---|---|
+| B1 | Docker Desktop / WSL2 not installed | **RESOLVED** - Docker 29.8.0 installed by the developer |
+| B2 | `confluent-kafka` native library blocked by Windows Application Control | **RESOLVED by design** - services run in Linux containers, where librdkafka 2.15.1 loads normally. The Kafka adapter is imported lazily so unit tests and `--dry-run` still work natively |
+| B3 | AWS free learning account cannot host a 100K events/s benchmark | Open. Agreed approach: measure locally with provenance, prove horizontal scaling with a replica ladder, publish a clearly labelled projection, deploy small to AWS only to prove the deployment path |
+
+### Throughput so far, scoped honestly
+
+| Measurement | Rate | Scope |
+|---|---|---|
+| Generation only, 1 process | 44,929 events/s | No broker |
+| Generate + produce, 1 container | 23,697 events/s | Single broker, RF=1 |
+
+Producer-side only. The consumer side - validation, dedup, idle state machine and
+batched writes to three stores - is the harder half and is **not yet measured**.
+ADR-0005 stays provisional until it is.
+
+### Next
+
+1. Processor: consume, validate to DLQ, per-vehicle high-water-mark dedup, idle state
+   machine, batched writes to Postgres/Mongo/Redis, alerts.
+2. Seed job: write the roster to Postgres so events have vehicles to join to.
+3. FastAPI: three endpoints, keyset pagination, OIDC stub.
+4. React: Fleet Overview and Idle Cost Leaderboard.
+5. Gate 1: one event visibly becomes one idle event and one cost figure in the UI.
+
+---
+
 ## 2026-09-29 - Day 1: foundation and domain core
 
 **Plan approved:** four-day schedule, walking skeleton first. See the approved

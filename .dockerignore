@@ -1,0 +1,30 @@
+# Keep the build context small and secrets out of it entirely.
+.git
+.github
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+coverage.xml
+.coverage*
+
+# Never send secrets or state into a build context.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+**/.terraform
+**/*.tfstate*
+
+# Not needed at runtime.
+web/node_modules
+web/dist
+docs
+tests
+infra/terraform
+*.md
+!README.md
