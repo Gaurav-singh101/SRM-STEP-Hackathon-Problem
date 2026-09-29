@@ -109,6 +109,10 @@ verify: lint test test-acceptance ## Everything CI enforces, in one command
 load: ## Run the load scenario and write results to docs/evidence/load/
 	$(UV) run python -m tests.load.run_scenario
 
+.PHONY: sql-plans
+sql-plans: ## Before/after EXPLAIN (ANALYZE, BUFFERS) into docs/evidence/sql/
+	$(UV) run python -m tests.tools.sql_plans --rows 2000000 --vehicles 5000
+
 .PHONY: security
 security: ## SAST, dependency and image scans into docs/evidence/security/
 	$(UV) run semgrep --config=auto --sarif --output=docs/evidence/security/semgrep.sarif || true

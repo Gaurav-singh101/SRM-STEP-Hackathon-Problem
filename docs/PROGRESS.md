@@ -4,6 +4,87 @@ Session handoff record (CLAUDE.md S17). Newest first.
 
 ---
 
+## 2026-09-29 - Day 3 start: query plans, STRIDE, and a measured NFR defect
+
+### Done
+
+| Area | State | Evidence |
+|---|---|---|
+| SQL before/after query plans | `tests/tools/sql_plans.py` builds a throwaway database, loads it, measures with `EXPLAIN (ANALYZE, BUFFERS)`, drops it | `docs/evidence/sql/query-plans.md` |
+| STRIDE threat model | 6 trust boundaries, every category, 5 open items ranked by what to fix first | `docs/STRIDE.md` |
+| Leaderboard reads the rollup | was aggregating raw `idle_events` per request | measured below |
+
+### NOT YET VERIFIED at the time of writing
+
+The shell tooling became unavailable mid-change. The following are written but **not run**:
+`uv run ruff check`, `mypy`, `pytest services/api` (two new leaderboard freshness tests),
+`npm run typecheck`/`build` for the web changes, and a re-run of `sql_plans.py` with the
+rollup comparison added. Do not treat the leaderboard change as done until they pass.
+
+### Findings worth keeping
+
+- **No index rescues the leaderboard.** It aggregated raw `idle_events` over a 30-day
+  window on every request, and the `(tenant_id, started_at DESC)` index bought almost
+  nothing (1.07x at 200K rows, 1.29x at 2M) because a month of one tenant's events is a
+  large fraction of the table, so PostgreSQL correctly chose a sequential scan. The
+  docstring claimed the query ran "over rows already narrowed by the index", which
+  measurement showed was not what happened.
+- **Reading the daily rollup instead is a clear win: ~3x, and under the 200 ms target.**
+  Comparing both variants as they ship, rollup 91 ms (89-117) against raw 282 ms (275-313),
+  ranges non-overlapping. `vehicle_daily_leaderboard_idx` earns its keep too, a genuine 2x
+  on the rollup query.
+- **Getting to that number took four passes and I was wrong twice on the way.** With a
+  5-sample median the ordering of the two variants reversed between runs: pass A said rollup
+  faster, pass B said raw faster and even showed the rollup's index making it *slower*
+  (0.45x, planner trading a parallel seq scan for a bitmap heap scan). I had already written
+  "1.8x faster" into the docstring off pass A, then over-corrected to "not a measured win"
+  off pass B. Both were artefacts of five samples on a machine contended by my own
+  concurrent benchmark runs.
+- **What fixed it:** nine samples instead of five, the full min-max range printed beside
+  every median, and a refusal to print a ratio when the ranges overlap. The `no measurable
+  difference` verdict now shown for the raw leaderboard is that rule firing correctly. The
+  conclusion was only accepted once two independent nine-sample runs agreed with
+  non-overlapping ranges. **The lesson is the deliverable here, not the ratio:** a
+  single-number benchmark on a contended laptop produced three different publishable
+  answers.
+- **The scaling argument still carries more weight than the 3x.** The rollup path scales
+  with vehicle-days, bounded by fleet size times window length; raw aggregation scales with
+  events, which is unbounded as telemetry frequency rises. Meeting 200 ms at 2M events on
+  one laptop is not the same as meeting it for 100K vehicles - a window-level pre-aggregate
+  is recorded as the next step, not built.
+- **Correctness was verified independently of performance.** The rollup ranking and the raw
+  ranking agree exactly on the demo data: 92 vehicles, 38,085.70 total either way, no
+  vehicle differing.
+- **The evidence file reported "Table size: 0 bytes".** `pg_total_relation_size` on a
+  partitioned parent returns 0 because the parent stores no rows, which reads as "the table
+  is empty" rather than "wrong function". Now summed over the partitions.
+- **Three queries did benefit enormously**: keyset pagination 37x, the partial excessive
+  index 15x, one-vehicle history 16x. So the index set is right; one query was reading the
+  wrong table.
+- **The demo database cannot produce useful query plans.** At ~2,600 idle events
+  PostgreSQL sequential-scans everything, so index choice makes no measurable difference.
+  Hence a throwaway database with generated rows, and the evidence file says plainly that
+  the rows are generated and that no platform throughput claim is derived from them.
+- **A genuine "before" needs the index absent, not disabled.** `SET enable_indexscan = off`
+  makes the planner fall back to a bitmap scan, so the comparison stops meaning what it
+  appears to mean.
+- **Three Makefile targets point at modules that do not exist**: `tests.load.run_scenario`,
+  `tests.chaos.run` and `tests.tools.pin_digests`. `tests/tools/` did not exist until this
+  change. Day 3 work will create the first two; the digest pinner needs writing or the
+  target needs removing.
+
+### Next
+
+1. Late-event reconciliation from `telemetry.late` - **needs a D6 decision first**, see
+   OPEN_DECISIONS. Nothing consumes that topic today, so "never silently drop" is not yet
+   true in practice.
+2. Security scans: Semgrep, Trivy, ZAP into `docs/evidence/security/`.
+3. Load and soak scenario, chaos tests.
+4. Terraform for AWS (written and validated, not applied) and Helm on local k3d.
+5. ADRs for D6, D9, D10, D11.
+
+---
+
 ## 2026-09-29 - Day 2: acceptance scenarios, and a field that was lying
 
 Two things: the BDD suite PDF S12 requires, and a coverage figure that was reported as

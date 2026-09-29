@@ -133,6 +133,22 @@ class UtilisationSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class Leaderboard:
+    """A leaderboard page plus how current it is.
+
+    The freshness fields are not decoration. The ranking is built from a rollup the batch
+    job maintains, so a leaderboard can be hours old, and one presented without saying so
+    would have a finance manager acting on yesterday's fleet as if it were today's.
+    ``None`` on both when the rollup is empty - which is "not computed yet", not "zero
+    cost".
+    """
+
+    items: list[LeaderboardRow]
+    data_through: date | None
+    computed_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
 class VehicleDetail:
     """Vehicle master data plus its idle totals."""
 
@@ -549,36 +565,65 @@ class FleetRepository:
 
     def idle_cost_leaderboard(
         self, principal: Principal, *, since: datetime, limit: int
-    ) -> list[LeaderboardRow]:
-        """Top-K vehicles by estimated idle cost.
+    ) -> Leaderboard:
+        """Top-K vehicles by estimated idle cost, read from the daily rollup.
 
-        Complexity: the aggregation is O(n log k) in the database's top-K, over rows
-        already narrowed by the ``(tenant_id, started_at DESC)`` index. Only BEVs are
-        absent, because they have no fuel cost to rank by.
+        **From ``vehicle_daily``, not from ``idle_events``.** The obvious implementation
+        aggregates raw events at request time, and that is what this did until it was
+        measured. Over a 30-day window one tenant's events are a large fraction of the
+        table, so the planner correctly chooses a sequential scan and the index does almost
+        nothing: 1.15x at two million rows. No index fixes a query that has to read most of
+        the rows.
+
+        Complexity: O(d x v) rows scanned, where d is days in the window and v is vehicles
+        with activity, then a top-K sort. The point is not the constant factor but what the
+        cost grows with - **vehicle-days rather than events**. Raw aggregation gets more
+        expensive as telemetry volume rises; this does not.
+
+        Measured at two million events, comparing both variants as they ship: this path is
+        about **3x faster** than raw aggregation with non-overlapping ranges across two
+        independent nine-sample runs, and it lands **under p95 < 200 ms** where the raw path
+        does not. The gain is 3x rather than an order of magnitude because compression is
+        only about 2:1 at that event density - which is why the scaling argument above
+        matters more than the constant factor.
+
+        If the target becomes tight at fleet scale the next step is a coarser pre-aggregate
+        keyed on ``(tenant_id, window_end, vin)`` with the window totals already summed, so
+        the request becomes an index range scan plus a top-K over one row per vehicle rather
+        than a ``GROUP BY`` over thirty. Recorded in ``docs/evidence/sql/query-plans.md``;
+        not built.
+
+        The cost of reading a rollup is freshness, so the result carries ``data_through``
+        and ``computed_at`` rather than letting a stale leaderboard pass for a live one.
+        Verified against the demo data to agree with the raw aggregation exactly: 92
+        vehicles and 38,085.70 total either way, no vehicle differing.
         """
         with self._scoped(principal) as cur:
             cur.execute(
                 """
-                SELECT i.vin, v.registration, v.class_code, v.powertrain_code, f.name,
-                       count(*), count(*) FILTER (WHERE i.excessive),
-                       sum(i.duration_seconds) / 3600.0,
-                       coalesce(sum(i.fuel_litres_est), 0),
-                       coalesce(sum(i.cost_est), 0), max(i.currency)
-                FROM idle_events i
-                JOIN vehicles v ON v.vin = i.vin
+                SELECT d.vin, v.registration, v.class_code, v.powertrain_code, f.name,
+                       sum(d.idle_event_count), sum(d.excessive_count),
+                       sum(d.idle_seconds) / 3600.0,
+                       sum(d.fuel_litres_est),
+                       sum(d.cost_est), max(d.currency),
+                       max(d.day), max(d.recomputed_at)
+                FROM vehicle_daily d
+                JOIN vehicles v ON v.vin = d.vin
                 JOIN fleets f ON f.fleet_id = v.fleet_id
-                WHERE i.tenant_id = %(tenant_id)s
-                  AND i.started_at >= %(since)s
-                  AND i.cost_est IS NOT NULL
-                GROUP BY i.vin, v.registration, v.class_code, v.powertrain_code, f.name
-                ORDER BY sum(i.cost_est) DESC
+                WHERE d.tenant_id = %(tenant_id)s
+                  AND d.day >= %(since)s
+                  -- Excludes BEVs without a special case: a vehicle with no fuel cost
+                  -- contributes 0, and a leaderboard of zeros is not worth ranking.
+                  AND d.cost_est > 0
+                GROUP BY d.vin, v.registration, v.class_code, v.powertrain_code, f.name
+                ORDER BY sum(d.cost_est) DESC
                 LIMIT %(limit)s
                 """,
-                {"tenant_id": principal.tenant_id, "since": since, "limit": limit},
+                {"tenant_id": principal.tenant_id, "since": since.date(), "limit": limit},
             )
             rows = cur.fetchall()
 
-        return [
+        entries = [
             LeaderboardRow(
                 vin=str(vin).strip(),
                 registration=str(registration),
@@ -588,7 +633,7 @@ class FleetRepository:
                 idle_event_count=int(count),
                 excessive_count=int(excessive),
                 total_idle_hours=float(hours),
-                total_fuel_litres=float(litres),
+                total_fuel_litres=float(litres or 0.0),
                 total_cost=Decimal(cost),
                 currency=str(currency) if currency else "",
             )
@@ -604,8 +649,18 @@ class FleetRepository:
                 litres,
                 cost,
                 currency,
+                _day,
+                _recomputed,
             ) in rows
         ]
+
+        # Freshness from the rows themselves rather than a separate query: whatever the
+        # leaderboard is built from is what it is current as of, by construction.
+        return Leaderboard(
+            items=entries,
+            data_through=max((row[11] for row in rows), default=None),
+            computed_at=max((row[12] for row in rows), default=None),
+        )
 
     # --------------------------------------------------------- vehicle detail
 

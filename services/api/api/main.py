@@ -383,7 +383,7 @@ def create_app() -> FastAPI:
         days: Annotated[int, Query(ge=1, le=365)] = DEFAULT_WINDOW_DAYS,
     ) -> LeaderboardResponse:
         since = datetime.now(UTC) - timedelta(days=days)
-        rows = repo.idle_cost_leaderboard(ctx.principal, since=since, limit=limit)
+        board = repo.idle_cost_leaderboard(ctx.principal, since=since, limit=limit)
         repo.record_access(
             ctx.principal,
             action="read_idle_leaderboard",
@@ -393,8 +393,10 @@ def create_app() -> FastAPI:
             client_ip_masked=ctx.client_ip_masked,
         )
         return LeaderboardResponse(
-            items=[LeaderboardEntry.from_row(row, rank) for rank, row in enumerate(rows, 1)],
+            items=[LeaderboardEntry.from_row(row, rank) for rank, row in enumerate(board.items, 1)],
             since=since,
+            data_through=board.data_through,
+            computed_at=board.computed_at,
         )
 
     @app.get(

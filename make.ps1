@@ -62,6 +62,7 @@ switch ($Target.ToLowerInvariant()) {
             @{ n = 'test-unit';        d = 'Unit tests only, no infrastructure needed' }
             @{ n = 'test-integration'; d = 'Integration tests (needs Docker)' }
             @{ n = 'test-acceptance';  d = 'BDD acceptance scenarios (behave)' }
+            @{ n = 'sql-plans';        d = 'Before/after query plans (needs Docker)' }
             @{ n = 'verify';           d = 'lint + test, everything CI enforces' }
             @{ n = 'sim';              d = 'Run the simulator: ./make.ps1 sim -N 5000' }
             @{ n = 'seed';             d = 'Seed the reference dataset' }
@@ -127,6 +128,13 @@ switch ($Target.ToLowerInvariant()) {
         # No Docker needed: the scenarios drive the real app over a fake data layer, so
         # they stay fast enough to run on every push.
         Invoke-Step 'behave' { uv run behave }
+    }
+
+    'sql-plans' {
+        Test-Docker
+        Invoke-Step 'query plans' {
+            uv run python -m tests.tools.sql_plans --rows 2000000 --vehicles 5000
+        }
     }
 
     'verify' {

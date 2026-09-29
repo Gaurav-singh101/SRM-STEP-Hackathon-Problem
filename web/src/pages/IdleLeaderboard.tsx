@@ -18,6 +18,7 @@ import {
   EmptyState,
   ErrorState,
   LoadingState,
+  formatDateTime,
   formatHours,
   formatMoney,
 } from '../components/common';
@@ -56,13 +57,22 @@ export function IdleLeaderboard({
     );
   }
 
-  const { items, excludes_bev: excludesBev } = leaderboard.data;
+  const {
+    items,
+    excludes_bev: excludesBev,
+    data_through: dataThrough,
+    computed_at: computedAt,
+  } = leaderboard.data;
 
   if (items.length === 0) {
     return (
       <EmptyState
         title="No priced idle events in this window"
-        hint="Either no vehicle idled beyond the threshold, or no fuel price is configured so no cost could be estimated."
+        hint={
+          dataThrough === null
+            ? 'The daily rollup this ranking reads has not been built yet. Run `python -m batch rollup`.'
+            : 'Either no vehicle idled beyond the threshold, or no fuel price is configured so no cost could be estimated.'
+        }
       />
     );
   }
@@ -87,6 +97,7 @@ export function IdleLeaderboard({
             Electric vehicles are absent: they have no fuel cost to rank by.
           </p>
         )}
+        <Freshness dataThrough={dataThrough} computedAt={computedAt} />
       </div>
 
       <DataTable caption={`Vehicles by estimated idle cost, last ${days} days`} headers={HEADERS}>
@@ -137,5 +148,33 @@ export function IdleLeaderboard({
         </section>
       )}
     </>
+  );
+}
+
+/**
+ * How current the ranking is.
+ *
+ * The leaderboard reads the daily rollup rather than raw events, because aggregating a
+ * month of a large fleet's events on every request cannot meet the latency target. The
+ * price of that is freshness, and a ranking that does not say how old it is invites a
+ * finance manager to act on yesterday's fleet as if it were today's.
+ *
+ * The drill-down below reads raw events directly, so it is always live. Saying so matters:
+ * otherwise the two halves of this page can legitimately disagree and look like a bug.
+ */
+function Freshness({
+  dataThrough,
+  computedAt,
+}: {
+  dataThrough: string | null;
+  computedAt: string | null;
+}): ReactNode {
+  if (dataThrough === null) return null;
+  return (
+    <p className="notice notice--inline">
+      Ranked from daily rollups through <strong>{dataThrough}</strong>
+      {computedAt !== null && <> · rebuilt {formatDateTime(computedAt)}</>}. Individual
+      events in the drill-down are read live.
+    </p>
   );
 }

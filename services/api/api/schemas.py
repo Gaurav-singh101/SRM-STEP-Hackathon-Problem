@@ -235,6 +235,13 @@ class LeaderboardEntry(_Base):
 class LeaderboardResponse(_Base):
     items: list[LeaderboardEntry]
     since: datetime
+    #: The last day the rollup behind this ranking covers, and when it was computed.
+    #: ``None`` when no rollup exists yet - which is "not computed", not "zero cost".
+    #: Present because the ranking comes from a rollup the batch job maintains, so it can
+    #: be hours old, and one shown without saying so has a finance manager acting on
+    #: yesterday's fleet as if it were today's.
+    data_through: date | None = None
+    computed_at: datetime | None = None
     #: Stated explicitly: BEVs cannot appear because they have no fuel cost to rank by.
     excludes_bev: bool = True
     is_estimate: bool = True

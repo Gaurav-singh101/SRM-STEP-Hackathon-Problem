@@ -67,6 +67,8 @@ runs the same commands:
 | `make test` | `./make.ps1 test` | Unit tests with the 80% coverage gate |
 | `make verify` | `./make.ps1 verify` | Everything CI enforces |
 | `make test-integration` | `./make.ps1 test-integration` | Testcontainers integration tests |
+| `make test-acceptance` | `./make.ps1 test-acceptance` | BDD scenarios (behave), no infrastructure needed |
+| `make sql-plans` | `./make.ps1 sql-plans` | Before/after query plans into `docs/evidence/sql/` |
 | `make sim N=100000` | `./make.ps1 sim -N 100000` | Run the simulator |
 | `make load` | - | Load scenario into `docs/evidence/load/` |
 | `make cloud-down` | - | Tear down the AWS environment |

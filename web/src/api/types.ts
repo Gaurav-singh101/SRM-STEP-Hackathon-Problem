@@ -102,6 +102,16 @@ export interface LeaderboardResponse {
   /** Electric vehicles cannot be ranked by fuel cost, and the API says so. */
   excludes_bev: boolean;
   is_estimate: boolean;
+  /**
+   * The last day the rollup behind this ranking covers, and when it was computed.
+   * `null` when no rollup exists yet - which is "not computed", not "zero cost".
+   *
+   * The ranking reads a rollup rather than raw events, because aggregating 30 days of a
+   * large fleet's events per request cannot meet the latency target. The cost of that is
+   * freshness, so it has to be shown rather than assumed.
+   */
+  data_through: string | null;
+  computed_at: string | null;
 }
 
 export interface TrendPoint {

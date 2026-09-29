@@ -13,7 +13,7 @@ import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -25,6 +25,7 @@ from api.adapters.repository import (
     AlertRow,
     FleetSummary,
     IdleEventRow,
+    Leaderboard,
     LeaderboardRow,
     UtilisationRow,
     UtilisationSnapshot,
@@ -41,6 +42,7 @@ from fleet_common.settings import api_settings, auth_settings
 TENANT_A = "tenant-alpha"
 TENANT_B = "tenant-bravo"
 NOW = datetime(2026, 9, 29, 12, 0, 0, tzinfo=UTC)
+NOW_DAY = NOW.date()
 
 #: Precise coordinates, so masking is observable in the response.
 PRECISE_LAT = 12.971598
@@ -277,6 +279,10 @@ class FakeRepository:
     idle_rows: list[IdleEventRow] = field(default_factory=list)
     vehicles: dict[str, VehicleDetail] = field(default_factory=dict)
     leaderboard: list[LeaderboardRow] = field(default_factory=list)
+    #: Rollup freshness. Defaults to the fixture's "now" so tests that do not care about
+    #: staleness still get a populated, plausible pair.
+    leaderboard_data_through: date | None = NOW_DAY
+    leaderboard_computed_at: datetime | None = NOW
     summary: FleetSummary | None = None
     utilisation_rows: list[UtilisationRow] = field(default_factory=list)
     alert_rows: list[AlertRow] = field(default_factory=list)
@@ -373,8 +379,13 @@ class FakeRepository:
 
     def idle_cost_leaderboard(
         self, principal: Principal, *, since: datetime, limit: int
-    ) -> list[LeaderboardRow]:
-        return self.leaderboard[:limit]
+    ) -> Leaderboard:
+        ranked = sorted(self.leaderboard, key=lambda r: r.total_cost, reverse=True)
+        return Leaderboard(
+            items=ranked[:limit],
+            data_through=self.leaderboard_data_through,
+            computed_at=self.leaderboard_computed_at,
+        )
 
     def vehicle_detail(self, principal: Principal, vin: str) -> VehicleDetail:
         detail = self.vehicles.get(vin)

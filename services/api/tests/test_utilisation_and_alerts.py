@@ -19,6 +19,7 @@ from api.testing import (
     FakeRepository,
     make_alert_row,
     make_coverage,
+    make_leaderboard_row,
     make_utilisation_row,
     make_utilisation_snapshot,
     make_vehicle_detail,
@@ -386,3 +387,34 @@ def test_another_tenants_vehicle_is_absent_not_forbidden(
     response = client.get(f"/api/v1/vehicles/{vin}", headers=auth_header)
     assert response.status_code == 404
     assert response.headers["content-type"].startswith(PROBLEM_JSON)
+
+
+# ------------------------------------------------------------------ leaderboard
+
+
+def test_the_leaderboard_says_how_current_it_is(
+    client: TestClient, repo: FakeRepository, auth_header: dict[str, str]
+) -> None:
+    """It is built from a rollup the batch job maintains, so it can be hours old.
+
+    A ranking presented without that has a finance manager acting on yesterday's fleet as
+    if it were today's - and the whole reason the query reads the rollup is speed, so the
+    staleness is a deliberate trade rather than an accident to hide.
+    """
+    repo.leaderboard = [make_leaderboard_row()]
+    body = client.get("/api/v1/leaderboard/idle-cost", headers=auth_header).json()
+    assert body["data_through"] == "2026-09-29"
+    assert body["computed_at"] is not None
+
+
+def test_an_uncomputed_leaderboard_reports_null_not_a_date(
+    client: TestClient, repo: FakeRepository, auth_header: dict[str, str]
+) -> None:
+    """No rollup yet is a different statement from a rollup covering nothing."""
+    repo.leaderboard = []
+    repo.leaderboard_data_through = None
+    repo.leaderboard_computed_at = None
+    body = client.get("/api/v1/leaderboard/idle-cost", headers=auth_header).json()
+    assert body["items"] == []
+    assert body["data_through"] is None
+    assert body["computed_at"] is None

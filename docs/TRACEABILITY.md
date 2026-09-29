@@ -75,6 +75,10 @@ section. `Dn` = open decision.
 | PDF-12 | BDD acceptance scenarios for the key user stories | `tests/acceptance/features/` | 4 features, 19 scenarios, 105 steps; `docs/evidence/acceptance/` | Done |
 | CM-14 | Utilisation coverage stated, never implied | `utilisation_window` table, `UtilisationCoverage` | `test_utilisation_window.py` (7 unit + 7 integration) | Done |
 | D10 | Alert latency split from data age | `AlertRow.processing_latency_seconds` | `test_a_replayed_alert_is_flagged_...` | Done |
+| PDF-11 | STRIDE threat model, gaps named rather than omitted | `docs/STRIDE.md` | 6 trust boundaries, 5 open items ranked | Done |
+| PDF-16, CM-9 | SQL before/after query plans with EXPLAIN (ANALYZE, BUFFERS) | `tests/tools/sql_plans.py` | `docs/evidence/sql/query-plans.md` | Done |
+| CM-9 | Leaderboard reads the daily rollup, not raw events | `repository.py::idle_cost_leaderboard` | ~3x faster, non-overlapping ranges over two nine-sample runs; scales with vehicle-days not events | Done |
+| CM-9 | Leaderboard under 200 ms | rollup read path | **91 ms (89-117)** at 2M events, LOCAL laptop. Not a fleet-scale claim; window-level pre-aggregate recorded as the next step | Met locally |
 | D9 | Partial totals declared, BEVs never zeroed | `schemas.py`, `PartialTotalNotice` | `test_summary_flags_a_partial_cost_total` | Done |
 | CM-14 | Fleet Overview view | `web/src/pages/FleetOverview.tsx` | - | Done |
 | CM-14 | Idle Cost Leaderboard view | `web/src/pages/IdleLeaderboard.tsx` | - | Done |
@@ -92,7 +96,7 @@ section. `Dn` = open decision.
 | D6 | Rollups and late-event reconciliation | `services/batch` | **Planned (Day 2)** |
 | PDF-9 | Geohash depot grouping, top-K, DTC surfacing | `libs/`, `web/` | **Partial** - DTC parsing done |
 | PDF-11 | Load, soak and chaos evidence | `docs/evidence/` | **Planned (Day 3)** |
-| PDF-13 | Terraform, Helm, STRIDE | `infra/`, `docs/STRIDE.md` | **Planned (Day 3)** |
+| PDF-13 | Terraform and Helm | `infra/` | **Planned (Day 3)** |
 | PDF-13 | Solution Document, ER diagram, demo video | `docs/` | **Planned (Day 4)** |
 
 ## Infrastructure and process
