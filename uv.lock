@@ -366,7 +366,9 @@ name = "fleet-batch"
 version = "0.1.0"
 source = { editable = "services/batch" }
 dependencies = [
+    { name = "confluent-kafka" },
     { name = "fleet-common" },
+    { name = "fleet-processor" },
     { name = "fleet-simulator" },
     { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pymongo" },
@@ -374,7 +376,9 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "confluent-kafka", specifier = ">=2.6" },
     { name = "fleet-common", editable = "libs/fleet_common" },
+    { name = "fleet-processor", editable = "services/processor" },
     { name = "fleet-simulator", editable = "services/simulator" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
     { name = "pymongo", specifier = ">=4.10" },

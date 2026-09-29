@@ -13,7 +13,7 @@ wait for the developer's answer, record an ADR, and only then treat it as final.
 | D3 | Utilisation formula | **DECIDED** | ADR-0003 | Composite score, median/MAD with a 10% MAD floor added after testing. |
 | D4 | Authentication provider | **OPEN** | - | Interim: local OIDC stub, RS256, vendor swappable by env config. No vendor in code. ADR due when the stub lands. |
 | D5 | Stream-processing technology | **DECIDED** | ADR-0005 | Python consumer group. Throughput measured: 4,404 events/s per consumer. Partitions raised 24 -> 96 for headroom; batch envelopes rejected with a reason. |
-| D6 | Batch/historical store | **OPEN** | - | Proposed: Postgres partitions + incremental rollups, Parquet cold tier behind an `ObjectStore` port. ADR due Day 2. |
+| D6 | Batch/historical store | **PARTIAL** | ADR-0007 | Reconciliation **decided** 2026-09-30: re-segment the affected vehicle-day inside the Mongo TTL, count and log anything older. Postgres partitions + incremental rollups in place. **Cold tier still open** - Parquet behind an `ObjectStore` port would narrow the TTL gap. |
 | D7 | Telemetry event schema | **DECIDED** | ADR-0004 | Extends the PDF example, which has no ignition/fuel signals. |
 | D8 | Kafka hosting on AWS | **OPEN** | - | Proposed: Strimzi on EKS for portability and cost; MSK as a Terraform module flag. Constrained by the free-tier account - see PROGRESS blocker B3. |
 | D9 | EV handling | **OPEN** | - | Proposed: ICE/hybrid in scope for fuel cost, BEVs utilisation-only, never silently summed into a fleet total. Partly implemented in ADR-0002; ADR due. |
@@ -32,12 +32,27 @@ wait for the developer's answer, record an ADR, and only then treat it as final.
 
 1. ~~The Solution Document Template~~ - **supplied** 2026-09-29, 17 sections confirmed
    at `docs/source/Motorq_Hackathon_Solution_Document_Template.md` (gap G13 closed).
-2. **AWS account type** - Academy Learner Lab or standard Free Tier. Learner Lab
-   commonly blocks EKS and IAM role creation, which changes the Day 3 plan.
+2. ~~AWS account type~~ - **resolved** 2026-09-30: **there is no AWS account.** This
+   changes nothing, because the approach in item 4 never applied the Terraform. What is
+   lost is only what a free-tier account could not have delivered either: the 100K
+   events/s benchmark on cloud hardware (PROGRESS blocker B3). `terraform validate` and
+   `fmt` need no credentials; `plan` and `apply` do and are out of scope. The submission
+   states this plainly rather than implying a deployment happened.
 3. ~~Partition count~~ - **decided** 2026-09-29: raised to 96 (ADR-0005 amendment).
-4. **Cloud deployment approach** - **decided** 2026-09-29: write and validate Terraform
-   for AWS but do not apply it, and verify the Helm charts on a real local Kubernetes
-   cluster (k3d). The hackathon asks for "Terraform for at least one cloud" and an
+4. **Cloud deployment approach** - **decided** 2026-09-29, reconfirmed 2026-09-30 now
+   that no AWS account exists: write and validate Terraform for AWS but do not apply it,
+   and verify the Helm charts on a real local Kubernetes cluster (Docker Desktop's
+   built-in Kubernetes, chosen 2026-09-30 over k3d because it needs no extra install). The hackathon asks for "Terraform for at least one cloud" and an
    architecture "deployable on at least one cloud", not a running cloud environment.
    The available account is a free learning tier, so applying it is not viable. This
    will be stated plainly in the solution document rather than implied.
+
+5. ~~Late-event reconciliation~~ - **decided** 2026-09-30, ADR-0007: re-segment the
+   affected vehicle-day from the complete raw sample set inside the MongoDB TTL; record
+   and count anything older as unreconcilable rather than recomputing from partial data.
+
+## Awaiting a developer action (not a decision)
+
+- **Enable Kubernetes in Docker Desktop** (Settings -> Kubernetes -> Enable -> Apply) so
+  the Helm charts can be verified against a real cluster rather than only linted.
+  `kubectl` v1.36.1 is already present; no cluster context exists yet.

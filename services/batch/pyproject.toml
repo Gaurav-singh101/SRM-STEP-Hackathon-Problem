@@ -9,8 +9,17 @@ dependencies = [
     # the generator rather than reimplementing it is the point: a VIN missing from the
     # vehicles table has no powertrain, and a vehicle with no powertrain has no cost.
     "fleet-simulator",
+    # Late-event reconciliation re-runs the SAME segmentation the stream uses, on a fresh
+    # BatchProcessor (ADR-0007). A bespoke re-segmentation path here would be a second
+    # definition of an idle event, and two definitions eventually disagree.
+    "fleet-processor",
     "psycopg[binary,pool]>=3.2",
     "pymongo>=4.10",
+    # Imported lazily by the late-topic drain only. On Windows the native library is
+    # blocked by Application Control (PROGRESS B2), so a module-level import would make
+    # every other batch subcommand unrunnable locally for the sake of one that only ever
+    # runs in a container.
+    "confluent-kafka>=2.6",
 ]
 
 [build-system]
