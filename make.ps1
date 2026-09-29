@@ -63,6 +63,7 @@ switch ($Target.ToLowerInvariant()) {
             @{ n = 'test-integration'; d = 'Integration tests (needs Docker)' }
             @{ n = 'test-acceptance';  d = 'BDD acceptance scenarios (behave)' }
             @{ n = 'sql-plans';        d = 'Before/after query plans (needs Docker)' }
+            @{ n = 'security';         d = 'Trivy dependency, secret and config scans' }
             @{ n = 'verify';           d = 'lint + test, everything CI enforces' }
             @{ n = 'sim';              d = 'Run the simulator: ./make.ps1 sim -N 5000' }
             @{ n = 'seed';             d = 'Seed the reference dataset' }
@@ -135,6 +136,30 @@ switch ($Target.ToLowerInvariant()) {
         Invoke-Step 'query plans' {
             uv run python -m tests.tools.sql_plans --rows 2000000 --vehicles 5000
         }
+    }
+
+    'security' {
+        Test-Docker
+        # Run from PowerShell, never Git Bash: MSYS path conversion rewrites the container
+        # path /src into C:/Program Files/Git/src and Trivy fails on a directory that does
+        # not exist. Both scopes are written, because the default one silently excludes npm
+        # dev dependencies - 318 of 364 packages here.
+        New-Item -ItemType Directory -Force -Path 'docs/evidence/security' | Out-Null
+        $skip = '.venv,web/node_modules,.git,web/dist,**/__pycache__'
+        $mount = "$($PWD):/src"
+        Invoke-Step 'trivy (runtime deps)' {
+            docker run --rm -v $mount -v trivy-cache:/root/.cache aquasec/trivy:latest `
+                fs --quiet --scanners vuln,secret,misconfig --severity CRITICAL,HIGH,MEDIUM `
+                --skip-dirs $skip --format json `
+                --output /src/docs/evidence/security/trivy-fs.json /src
+        }
+        Invoke-Step 'trivy (incl. dev deps)' {
+            docker run --rm -v $mount -v trivy-cache:/root/.cache aquasec/trivy:latest `
+                fs --quiet --scanners vuln,secret,misconfig --include-dev-deps `
+                --severity CRITICAL,HIGH,MEDIUM,LOW --skip-dirs $skip --format json `
+                --output /src/docs/evidence/security/trivy-fs-with-dev.json /src
+        }
+        Invoke-Step 'summary' { uv run python -m tests.tools.scan_summary }
     }
 
     'verify' {

@@ -76,6 +76,10 @@ section. `Dn` = open decision.
 | CM-14 | Utilisation coverage stated, never implied | `utilisation_window` table, `UtilisationCoverage` | `test_utilisation_window.py` (7 unit + 7 integration) | Done |
 | D10 | Alert latency split from data age | `AlertRow.processing_latency_seconds` | `test_a_replayed_alert_is_flagged_...` | Done |
 | PDF-11 | STRIDE threat model, gaps named rather than omitted | `docs/STRIDE.md` | 6 trust boundaries, 5 open items ranked | Done |
+| PDF-12 | Dependency, secret and config scans | `make security`, `tests/tools/scan_summary.py` | `docs/evidence/security/` — 83 Python + 355 npm packages, 0 vulns, 1 LOW misconfig | Done |
+| PDF-12 | A scan failure actually fails the build | `scan_summary.py` exit code | `test_scan_summary.py` (7 cases) | Done |
+| PDF-12 | SAST (Semgrep) evidence committed | `docs/evidence/security/` | CI runs it; artefacts **not committed**, no local evidence yet | **Open** |
+| PDF-12 | DAST (OWASP ZAP) and built-image scan | - | **Not run** | **Open** |
 | PDF-16, CM-9 | SQL before/after query plans with EXPLAIN (ANALYZE, BUFFERS) | `tests/tools/sql_plans.py` | `docs/evidence/sql/query-plans.md` | Done |
 | CM-9 | Leaderboard reads the daily rollup, not raw events | `repository.py::idle_cost_leaderboard` | ~3x faster, non-overlapping ranges over two nine-sample runs; scales with vehicle-days not events | Done |
 | CM-9 | Leaderboard under 200 ms | rollup read path | **91 ms (89-117)** at 2M events, LOCAL laptop. Not a fleet-scale claim; window-level pre-aggregate recorded as the next step | Met locally |

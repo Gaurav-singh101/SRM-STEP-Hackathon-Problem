@@ -113,11 +113,28 @@ load: ## Run the load scenario and write results to docs/evidence/load/
 sql-plans: ## Before/after EXPLAIN (ANALYZE, BUFFERS) into docs/evidence/sql/
 	$(UV) run python -m tests.tools.sql_plans --rows 2000000 --vehicles 5000
 
+# Trivy runs in a container rather than as a local binary, so this works on a machine with
+# only Docker installed. Three flags are load-bearing, and two of them cost a failed run to
+# discover (see docs/evidence/security/README.md):
+#   --skip-dirs         without it the secret scanner walks .venv and times out mid-file
+#   --include-dev-deps  without it npm dev dependencies are skipped - here 318 of 364
+#                       packages, and the build chain is exactly what STRIDE E6 is about
+# Both scopes are written, because the default-scope report alone reads as covering far
+# more than it does.
+TRIVY_IMAGE ?= aquasec/trivy:latest
+TRIVY_SKIP  ?= .venv,web/node_modules,.git,web/dist,**/__pycache__
+TRIVY_RUN    = docker run --rm -v "$(CURDIR):/src" -v trivy-cache:/root/.cache $(TRIVY_IMAGE)
+
 .PHONY: security
-security: ## SAST, dependency and image scans into docs/evidence/security/
-	$(UV) run semgrep --config=auto --sarif --output=docs/evidence/security/semgrep.sarif || true
-	trivy fs --scanners vuln,secret --format json \
-		--output docs/evidence/security/trivy-fs.json . || true
+security: ## Dependency, secret and config scans into docs/evidence/security/
+	@mkdir -p docs/evidence/security
+	$(TRIVY_RUN) fs --quiet --scanners vuln,secret,misconfig \
+		--severity CRITICAL,HIGH,MEDIUM --skip-dirs "$(TRIVY_SKIP)" \
+		--format json --output /src/docs/evidence/security/trivy-fs.json /src
+	$(TRIVY_RUN) fs --quiet --scanners vuln,secret,misconfig --include-dev-deps \
+		--severity CRITICAL,HIGH,MEDIUM,LOW --skip-dirs "$(TRIVY_SKIP)" \
+		--format json --output /src/docs/evidence/security/trivy-fs-with-dev.json /src
+	$(UV) run python -m tests.tools.scan_summary
 
 .PHONY: chaos
 chaos: ## Kill a broker and a consumer, prove recovery

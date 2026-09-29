@@ -1,0 +1,1793 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.74.0"
+  },
+  "ReportID": "01a0ee90-d8e9-7af0-afba-0b6481fd996f",
+  "CreatedAt": "2026-09-29T19:07:45.257720768Z",
+  "ArtifactID": "sha256:89f5b32beec1a904577c2cc0949b1b097b3c85ae7c5bbe0f8c605a17c12b4e64",
+  "ArtifactName": "/src",
+  "ArtifactType": "repository",
+  "Metadata": {
+    "Branch": "master",
+    "Commit": "3368b1217b5656eef8ffc7a5e946e41a439f3716",
+    "CommitMsg": "perf: read the leaderboard from the daily rollup, with the plans to show it\n\nAdds tests/tools/sql_plans.py, which builds a throwaway database, loads it,\nmeasures with EXPLAIN (ANALYZE, BUFFERS) before and after creating the shipped\nindexes, and drops it. The demo database holds ~2,600 idle events; at that size\nPostgreSQL correctly sequential-scans everything, so plans taken from it would\nprove nothing. The \"before\" case has the index genuinely absent rather than\ndisabled with enable_indexscan = off, because a disabled index scan falls back to\na bitmap scan and the comparison stops meaning what it appears to mean.\n\nThree shipped indexes are transformative at two million rows: keyset pagination,\nthe partial excessive index and the per-vehicle history each gain two orders of\nmagnitude. One query was reading the wrong table.\n\nThe idle-cost leaderboard aggregated raw idle_events over a 30-day window on\nevery request. Its own docstring claimed the index narrowed the scan; measurement\nshowed the planner choosing a sequential scan, because a month of one tenant's\nevents is a large fraction of the table and no index fixes a query that has to\nread most of the rows. In every run, with or without the index, that path stayed\nabove the 200 ms target. It now reads vehicle_daily - which already had an index\nnamed vehicle_daily_leaderboard_idx that nothing used - and lands at ~100 ms,\nabout 3x faster, with non-overlapping ranges across four independent runs.\n\nCorrectness was checked separately from performance: the rollup ranking and the\nraw ranking agree exactly on the demo data, 92 vehicles and 38,085.70 either way,\nno vehicle differing. The cost of reading a rollup is freshness, so the response\ncarries data_through and computed_at, and the UI states the as-of date and says\nthe drill-down is read live - otherwise the two halves of the page can\nlegitimately disagree and look like a bug.\n\nThe method is the more useful finding. An earlier version took the median of five\nruns and printed that single number, and the ordering of the two leaderboard\nvariants reversed between passes: one said the rollup was faster, the next said\nraw was and even showed the rollup's own index making it slower. I wrote\n\"1.8x faster\" into the docstring off the first pass, then over-corrected to \"not a\nmeasured win\" off the second. Both were artefacts of five samples on a machine\ncontended by my own concurrent runs. Fixed by taking nine samples, printing the\nfull min-max range beside every median, refusing to print a ratio when the two\nranges overlap, and accepting a claim only once two independent runs agreed with\nnon-overlapping ranges. The narrative now asserts only what is durable and points\nat the table for what is not, so it cannot contradict the numbers above it.\n\nAlso fixed: the report said \"Table size: 0 bytes\", because\npg_total_relation_size on a partitioned parent returns 0 - which reads as an empty\ntable rather than as the wrong function. Now summed over the partitions.\n\nAdds docs/STRIDE.md: six trust boundaries, every STRIDE category, mitigations\nnaming the code and test that implement them, and the gaps written down rather\nthan omitted. Five open items ranked, the first being that nothing binds a\nproducer identity to a VIN, so everything downstream trusts that an event for a\nVIN came from that vehicle. Every test name it cites was checked to exist.\n\nCo-Authored-By: Claude Opus 5 \u003cnoreply@anthropic.com\u003e",
+    "Author": "Gaurav Singh \u003cgauravsingh74580@gmail.com\u003e",
+    "Committer": "Gaurav Singh \u003cgauravsingh74580@gmail.com\u003e"
+  },
+  "Results": [
+    {
+      "Target": "uv.lock",
+      "Class": "lang-pkgs",
+      "Type": "uv",
+      "Packages": [
+        {
+          "ID": "fleet-intel@0.1.0",
+          "Name": "fleet-intel",
+          "Identifier": {
+            "PURL": "pkg:pypi/fleet-intel@0.1.0",
+            "UID": "2b5cc258ece54a71"
+          },
+          "Version": "0.1.0",
+          "Relationship": "root",
+          "DependsOn": [
+            "fleet-api@0.1.0",
+            "fleet-batch@0.1.0",
+            "fleet-common@0.1.0",
+            "fleet-oidc-stub@0.1.0",
+            "fleet-processor@0.1.0",
+            "fleet-simulator@0.1.0",
+            "httpx@0.28.1",
+            "pyyaml@6.0.3"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "fleet-api@0.1.0",
+          "Name": "fleet-api",
+          "Identifier": {
+            "PURL": "pkg:pypi/fleet-api@0.1.0",
+            "UID": "ef924a6a98b6214d"
+          },
+          "Version": "0.1.0",
+          "Relationship": "direct",
+          "DependsOn": [
+            "fastapi@0.141.1",
+            "fleet-common@0.1.0",
+            "psycopg-pool@3.3.3",
+            "psycopg@3.3.6",
+            "pymongo@4.18.2",
+            "redis@8.1.0",
+            "uvicorn@0.54.0"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "fleet-batch@0.1.0",
+          "Name": "fleet-batch",
+          "Identifier": {
+            "PURL": "pkg:pypi/fleet-batch@0.1.0",
+            "UID": "a105c7e3dde8aa39"
+          },
+          "Version": "0.1.0",
+          "Relationship": "direct",
+          "DependsOn": [
+            "fleet-common@0.1.0",
+            "fleet-simulator@0.1.0",
+            "psycopg@3.3.6",
+            "pymongo@4.18.2"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "fleet-common@0.1.0",
+          "Name": "fleet-common",
+          "Identifier": {
+            "PURL": "pkg:pypi/fleet-common@0.1.0",
+            "UID": "bd9e705d0fdcf3e6"
+          },
+          "Version": "0.1.0",
+          "Relationship": "direct",
+          "DependsOn": [
+            "httpx@0.28.1",
+            "orjson@3.12.0",
+            "prometheus-client@0.26.0",
+            "pydantic-settings@2.15.0",
+            "pydantic@2.13.5",
+            "pyjwt@2.15.1",
+            "structlog@26.1.0"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "fleet-oidc-stub@0.1.0",
+          "Name": "fleet-oidc-stub",
+          "Identifier": {
+            "PURL": "pkg:pypi/fleet-oidc-stub@0.1.0",
+            "UID": "fc4344c255f301b6"
+          },
+          "Version": "0.1.0",
+          "Relationship": "direct",
+          "DependsOn": [
+            "fastapi@0.141.1",
+            "fleet-common@0.1.0",
+            "python-multipart@0.0.32",
+            "uvicorn@0.54.0"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "fleet-processor@0.1.0",
+          "Name": "fleet-processor",
+          "Identifier": {
+            "PURL": "pkg:pypi/fleet-processor@0.1.0",
+            "UID": "b4328c508d18cde9"
+          },
+          "Version": "0.1.0",
+          "Relationship": "direct",
+          "DependsOn": [
+            "confluent-kafka@2.15.1",
+            "fleet-common@0.1.0",
+            "psycopg-pool@3.3.3",
+            "psycopg@3.3.6",
+            "pymongo@4.18.2",
+            "redis@8.1.0"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "fleet-simulator@0.1.0",
+          "Name": "fleet-simulator",
+          "Identifier": {
+            "PURL": "pkg:pypi/fleet-simulator@0.1.0",
+            "UID": "b58090e67e7afcf8"
+          },
+          "Version": "0.1.0",
+          "Relationship": "direct",
+          "DependsOn": [
+            "confluent-kafka@2.15.1",
+            "fleet-common@0.1.0",
+            "numpy@2.5.3"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "httpx@0.28.1",
+          "Name": "httpx",
+          "Identifier": {
+            "PURL": "pkg:pypi/httpx@0.28.1",
+            "UID": "ee8724459b43b83e"
+          },
+          "Version": "0.28.1",
+          "Relationship": "direct",
+          "DependsOn": [
+            "anyio@4.15.1",
+            "certifi@2026.7.22",
+            "httpcore@1.0.9",
+            "idna@3.20"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "pyyaml@6.0.3",
+          "Name": "pyyaml",
+          "Identifier": {
+            "PURL": "pkg:pypi/pyyaml@6.0.3",
+            "UID": "2a5eb4b41df473c2"
+          },
+          "Version": "6.0.3",
+          "Relationship": "direct",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "annotated-doc@0.0.5",
+          "Name": "annotated-doc",
+          "Identifier": {
+            "PURL": "pkg:pypi/annotated-doc@0.0.5",
+            "UID": "789160a1e6bce043"
+          },
+          "Version": "0.0.5",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "annotated-types@0.8.0",
+          "Name": "annotated-types",
+          "Identifier": {
+            "PURL": "pkg:pypi/annotated-types@0.8.0",
+            "UID": "628450cec6fe2976"
+          },
+          "Version": "0.8.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "anyio@4.15.1",
+          "Name": "anyio",
+          "Identifier": {
+            "PURL": "pkg:pypi/anyio@4.15.1",
+            "UID": "9c372fd1cb10b1f4"
+          },
+          "Version": "4.15.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "idna@3.20",
+            "typing-extensions@4.16.0"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "certifi@2026.7.22",
+          "Name": "certifi",
+          "Identifier": {
+            "PURL": "pkg:pypi/certifi@2026.7.22",
+            "UID": "9a01233006514e04"
+          },
+          "Version": "2026.7.22",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "cffi@2.1.1",
+          "Name": "cffi",
+          "Identifier": {
+            "PURL": "pkg:pypi/cffi@2.1.1",
+            "UID": "2daf329300407a38"
+          },
+          "Version": "2.1.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "pycparser@3.0"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "click@8.5.0",
+          "Name": "click",
+          "Identifier": {
+            "PURL": "pkg:pypi/click@8.5.0",
+            "UID": "1507ba743c24d894"
+          },
+          "Version": "8.5.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "confluent-kafka@2.15.1",
+          "Name": "confluent-kafka",
+          "Identifier": {
+            "PURL": "pkg:pypi/confluent-kafka@2.15.1",
+            "UID": "d8a1d356df35ee06"
+          },
+          "Version": "2.15.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "cryptography@50.0.1",
+          "Name": "cryptography",
+          "Identifier": {
+            "PURL": "pkg:pypi/cryptography@50.0.1",
+            "UID": "a874d0c58024cbd1"
+          },
+          "Version": "50.0.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cffi@2.1.1"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "dnspython@2.8.0",
+          "Name": "dnspython",
+          "Identifier": {
+            "PURL": "pkg:pypi/dnspython@2.8.0",
+            "UID": "23e6fd2183b6e241"
+          },
+          "Version": "2.8.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "fastapi@0.141.1",
+          "Name": "fastapi",
+          "Identifier": {
+            "PURL": "pkg:pypi/fastapi@0.141.1",
+            "UID": "67e625fee2d924b"
+          },
+          "Version": "0.141.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "annotated-doc@0.0.5",
+            "pydantic@2.13.5",
+            "starlette@1.7.0",
+            "typing-extensions@4.16.0",
+            "typing-inspection@0.4.4"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "h11@0.16.0",
+          "Name": "h11",
+          "Identifier": {
+            "PURL": "pkg:pypi/h11@0.16.0",
+            "UID": "d50a8db9ed31c7b5"
+          },
+          "Version": "0.16.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "httpcore@1.0.9",
+          "Name": "httpcore",
+          "Identifier": {
+            "PURL": "pkg:pypi/httpcore@1.0.9",
+            "UID": "e2f330ca89a87fa7"
+          },
+          "Version": "1.0.9",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "certifi@2026.7.22",
+            "h11@0.16.0"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "httptools@0.8.0",
+          "Name": "httptools",
+          "Identifier": {
+            "PURL": "pkg:pypi/httptools@0.8.0",
+            "UID": "6f965beebdbfa56e"
+          },
+          "Version": "0.8.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "idna@3.20",
+          "Name": "idna",
+          "Identifier": {
+            "PURL": "pkg:pypi/idna@3.20",
+            "UID": "c64541044456d7da"
+          },
+          "Version": "3.20",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "numpy@2.5.3",
+          "Name": "numpy",
+          "Identifier": {
+            "PURL": "pkg:pypi/numpy@2.5.3",
+            "UID": "d09627b840bce82b"
+          },
+          "Version": "2.5.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "orjson@3.12.0",
+          "Name": "orjson",
+          "Identifier": {
+            "PURL": "pkg:pypi/orjson@3.12.0",
+            "UID": "2292044afeb2035d"
+          },
+          "Version": "3.12.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "prometheus-client@0.26.0",
+          "Name": "prometheus-client",
+          "Identifier": {
+            "PURL": "pkg:pypi/prometheus-client@0.26.0",
+            "UID": "eed47ae5decf6a58"
+          },
+          "Version": "0.26.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "psycopg@3.3.6",
+          "Name": "psycopg",
+          "Identifier": {
+            "PURL": "pkg:pypi/psycopg@3.3.6",
+            "UID": "a9b6a6ab49f79acf"
+          },
+          "Version": "3.3.6",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "psycopg-binary@3.3.6",
+            "psycopg-pool@3.3.3",
+            "typing-extensions@4.16.0",
+            "tzdata@2026.4"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "psycopg-binary@3.3.6",
+          "Name": "psycopg-binary",
+          "Identifier": {
+            "PURL": "pkg:pypi/psycopg-binary@3.3.6",
+            "UID": "d7c987f03a3710e1"
+          },
+          "Version": "3.3.6",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "psycopg-pool@3.3.3",
+          "Name": "psycopg-pool",
+          "Identifier": {
+            "PURL": "pkg:pypi/psycopg-pool@3.3.3",
+            "UID": "335c04482a89713d"
+          },
+          "Version": "3.3.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "typing-extensions@4.16.0"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "pycparser@3.0",
+          "Name": "pycparser",
+          "Identifier": {
+            "PURL": "pkg:pypi/pycparser@3.0",
+            "UID": "c92284e7051d4ada"
+          },
+          "Version": "3.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "pydantic@2.13.5",
+          "Name": "pydantic",
+          "Identifier": {
+            "PURL": "pkg:pypi/pydantic@2.13.5",
+            "UID": "6be276daefecc4c8"
+          },
+          "Version": "2.13.5",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "annotated-types@0.8.0",
+            "pydantic-core@2.46.5",
+            "typing-extensions@4.16.0",
+            "typing-inspection@0.4.4"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "pydantic-core@2.46.5",
+          "Name": "pydantic-core",
+          "Identifier": {
+            "PURL": "pkg:pypi/pydantic-core@2.46.5",
+            "UID": "24b6d42517663d51"
+          },
+          "Version": "2.46.5",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "typing-extensions@4.16.0"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "pydantic-settings@2.15.0",
+          "Name": "pydantic-settings",
+          "Identifier": {
+            "PURL": "pkg:pypi/pydantic-settings@2.15.0",
+            "UID": "5995f7a504520144"
+          },
+          "Version": "2.15.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "pydantic@2.13.5",
+            "python-dotenv@1.2.3",
+            "typing-inspection@0.4.4"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "pyjwt@2.15.1",
+          "Name": "pyjwt",
+          "Identifier": {
+            "PURL": "pkg:pypi/pyjwt@2.15.1",
+            "UID": "6dbcdaa29bbacaef"
+          },
+          "Version": "2.15.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "cryptography@50.0.1"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "pymongo@4.18.2",
+          "Name": "pymongo",
+          "Identifier": {
+            "PURL": "pkg:pypi/pymongo@4.18.2",
+            "UID": "99ca28ac7e1e4655"
+          },
+          "Version": "4.18.2",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "dnspython@2.8.0"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "python-dotenv@1.2.3",
+          "Name": "python-dotenv",
+          "Identifier": {
+            "PURL": "pkg:pypi/python-dotenv@1.2.3",
+            "UID": "106d89463ce3c445"
+          },
+          "Version": "1.2.3",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "python-multipart@0.0.32",
+          "Name": "python-multipart",
+          "Identifier": {
+            "PURL": "pkg:pypi/python-multipart@0.0.32",
+            "UID": "37f9cd97a6d6eb17"
+          },
+          "Version": "0.0.32",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "redis@8.1.0",
+          "Name": "redis",
+          "Identifier": {
+            "PURL": "pkg:pypi/redis@8.1.0",
+            "UID": "3c4480cb71031492"
+          },
+          "Version": "8.1.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "starlette@1.7.0",
+          "Name": "starlette",
+          "Identifier": {
+            "PURL": "pkg:pypi/starlette@1.7.0",
+            "UID": "78bbc96718f72e0d"
+          },
+          "Version": "1.7.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "anyio@4.15.1",
+            "typing-extensions@4.16.0"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "structlog@26.1.0",
+          "Name": "structlog",
+          "Identifier": {
+            "PURL": "pkg:pypi/structlog@26.1.0",
+            "UID": "ba9ddd0dd2203fdb"
+          },
+          "Version": "26.1.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "typing-extensions@4.16.0",
+          "Name": "typing-extensions",
+          "Identifier": {
+            "PURL": "pkg:pypi/typing-extensions@4.16.0",
+            "UID": "23fd9c45aea880bf"
+          },
+          "Version": "4.16.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "typing-inspection@0.4.4",
+          "Name": "typing-inspection",
+          "Identifier": {
+            "PURL": "pkg:pypi/typing-inspection@0.4.4",
+            "UID": "cd0e447ca908db0d"
+          },
+          "Version": "0.4.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "typing-extensions@4.16.0"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "tzdata@2026.4",
+          "Name": "tzdata",
+          "Identifier": {
+            "PURL": "pkg:pypi/tzdata@2026.4",
+            "UID": "a764ece80c4fe1d6"
+          },
+          "Version": "2026.4",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "uvicorn@0.54.0",
+          "Name": "uvicorn",
+          "Identifier": {
+            "PURL": "pkg:pypi/uvicorn@0.54.0",
+            "UID": "90e945f53c3445f3"
+          },
+          "Version": "0.54.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "click@8.5.0",
+            "h11@0.16.0",
+            "httptools@0.8.0",
+            "python-dotenv@1.2.3",
+            "pyyaml@6.0.3",
+            "uvloop@0.22.1",
+            "watchfiles@1.3.0",
+            "websockets@17.1"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "uvloop@0.22.1",
+          "Name": "uvloop",
+          "Identifier": {
+            "PURL": "pkg:pypi/uvloop@0.22.1",
+            "UID": "a4968809f9ee417a"
+          },
+          "Version": "0.22.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "watchfiles@1.3.0",
+          "Name": "watchfiles",
+          "Identifier": {
+            "PURL": "pkg:pypi/watchfiles@1.3.0",
+            "UID": "bf42d296e6b22b23"
+          },
+          "Version": "1.3.0",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "anyio@4.15.1"
+          ],
+          "AnalyzedBy": "uv"
+        },
+        {
+          "ID": "websockets@17.1",
+          "Name": "websockets",
+          "Identifier": {
+            "PURL": "pkg:pypi/websockets@17.1",
+            "UID": "d803d1aef715fffd"
+          },
+          "Version": "17.1",
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "uv"
+        }
+      ]
+    },
+    {
+      "Target": "web/package-lock.json",
+      "Class": "lang-pkgs",
+      "Type": "npm",
+      "Packages": [
+        {
+          "ID": "@tanstack/react-query@5.104.0",
+          "Name": "@tanstack/react-query",
+          "Identifier": {
+            "PURL": "pkg:npm/%40tanstack/react-query@5.104.0",
+            "UID": "7aa8fb3559e1eb6a"
+          },
+          "Version": "5.104.0",
+          "Licenses": [
+            "MIT"
+          ],
+          "Relationship": "direct",
+          "DependsOn": [
+            "@tanstack/query-core@5.104.0",
+            "react@18.3.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1674,
+              "EndLine": 1689
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "react@18.3.1",
+          "Name": "react",
+          "Identifier": {
+            "PURL": "pkg:npm/react@18.3.1",
+            "UID": "cb1638349b90e9ce"
+          },
+          "Version": "18.3.1",
+          "Licenses": [
+            "MIT"
+          ],
+          "Relationship": "direct",
+          "DependsOn": [
+            "loose-envify@1.4.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 4221,
+              "EndLine": 4232
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "react-dom@18.3.1",
+          "Name": "react-dom",
+          "Identifier": {
+            "PURL": "pkg:npm/react-dom@18.3.1",
+            "UID": "a877ad0556d629cb"
+          },
+          "Version": "18.3.1",
+          "Licenses": [
+            "MIT"
+          ],
+          "Relationship": "direct",
+          "DependsOn": [
+            "loose-envify@1.4.0",
+            "react@18.3.1",
+            "scheduler@0.23.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 4233,
+              "EndLine": 4245
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "recharts@2.15.4",
+          "Name": "recharts",
+          "Identifier": {
+            "PURL": "pkg:npm/recharts@2.15.4",
+            "UID": "a32486b4e061f06a"
+          },
+          "Version": "2.15.4",
+          "Licenses": [
+            "MIT"
+          ],
+          "Relationship": "direct",
+          "DependsOn": [
+            "clsx@2.1.1",
+            "eventemitter3@4.0.7",
+            "lodash@4.18.1",
+            "react-dom@18.3.1",
+            "react-is@18.3.1",
+            "react-smooth@4.0.4",
+            "react@18.3.1",
+            "recharts-scale@0.4.5",
+            "tiny-invariant@1.3.3",
+            "victory-vendor@36.9.2"
+          ],
+          "Locations": [
+            {
+              "StartLine": 4295,
+              "EndLine": 4318
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "@babel/runtime@7.29.7",
+          "Name": "@babel/runtime",
+          "Identifier": {
+            "PURL": "pkg:npm/%40babel/runtime@7.29.7",
+            "UID": "dbbee5da1f855c82"
+          },
+          "Version": "7.29.7",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 315,
+              "EndLine": 323
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "@tanstack/query-core@5.104.0",
+          "Name": "@tanstack/query-core",
+          "Identifier": {
+            "PURL": "pkg:npm/%40tanstack/query-core@5.104.0",
+            "UID": "db2971a468d81af2"
+          },
+          "Version": "5.104.0",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1664,
+              "EndLine": 1673
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "@types/d3-array@3.2.2",
+          "Name": "@types/d3-array",
+          "Identifier": {
+            "PURL": "pkg:npm/%40types/d3-array@3.2.2",
+            "UID": "800c6921e0885983"
+          },
+          "Version": "3.2.2",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1830,
+              "EndLine": 1835
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "@types/d3-color@3.1.3",
+          "Name": "@types/d3-color",
+          "Identifier": {
+            "PURL": "pkg:npm/%40types/d3-color@3.1.3",
+            "UID": "b27b4177030ccc0f"
+          },
+          "Version": "3.1.3",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1836,
+              "EndLine": 1841
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "@types/d3-ease@3.0.2",
+          "Name": "@types/d3-ease",
+          "Identifier": {
+            "PURL": "pkg:npm/%40types/d3-ease@3.0.2",
+            "UID": "14850c044dbaadb3"
+          },
+          "Version": "3.0.2",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1842,
+              "EndLine": 1847
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "@types/d3-interpolate@3.0.4",
+          "Name": "@types/d3-interpolate",
+          "Identifier": {
+            "PURL": "pkg:npm/%40types/d3-interpolate@3.0.4",
+            "UID": "114fea250cdb21d"
+          },
+          "Version": "3.0.4",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "@types/d3-color@3.1.3"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1848,
+              "EndLine": 1856
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "@types/d3-path@3.1.1",
+          "Name": "@types/d3-path",
+          "Identifier": {
+            "PURL": "pkg:npm/%40types/d3-path@3.1.1",
+            "UID": "cc877417d4ef3150"
+          },
+          "Version": "3.1.1",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1857,
+              "EndLine": 1862
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "@types/d3-scale@4.0.9",
+          "Name": "@types/d3-scale",
+          "Identifier": {
+            "PURL": "pkg:npm/%40types/d3-scale@4.0.9",
+            "UID": "4de30c6b467fe37e"
+          },
+          "Version": "4.0.9",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "@types/d3-time@3.0.4"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1863,
+              "EndLine": 1871
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "@types/d3-shape@3.2.0",
+          "Name": "@types/d3-shape",
+          "Identifier": {
+            "PURL": "pkg:npm/%40types/d3-shape@3.2.0",
+            "UID": "150d3378301d471e"
+          },
+          "Version": "3.2.0",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "@types/d3-path@3.1.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 1872,
+              "EndLine": 1880
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "@types/d3-time@3.0.4",
+          "Name": "@types/d3-time",
+          "Identifier": {
+            "PURL": "pkg:npm/%40types/d3-time@3.0.4",
+            "UID": "54bf038525a3df16"
+          },
+          "Version": "3.0.4",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1881,
+              "EndLine": 1886
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "@types/d3-timer@3.0.2",
+          "Name": "@types/d3-timer",
+          "Identifier": {
+            "PURL": "pkg:npm/%40types/d3-timer@3.0.2",
+            "UID": "e57babe63ec0c352"
+          },
+          "Version": "3.0.2",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 1887,
+              "EndLine": 1892
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "clsx@2.1.1",
+          "Name": "clsx",
+          "Identifier": {
+            "PURL": "pkg:npm/clsx@2.1.1",
+            "UID": "dfeb92ee1125b926"
+          },
+          "Version": "2.1.1",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 2487,
+              "EndLine": 2495
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "csstype@3.2.3",
+          "Name": "csstype",
+          "Identifier": {
+            "PURL": "pkg:npm/csstype@3.2.3",
+            "UID": "813b0350eb8959b9"
+          },
+          "Version": "3.2.3",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 2586,
+              "EndLine": 2591
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "d3-array@3.2.4",
+          "Name": "d3-array",
+          "Identifier": {
+            "PURL": "pkg:npm/d3-array@3.2.4",
+            "UID": "5f27d07d1e704a62"
+          },
+          "Version": "3.2.4",
+          "Licenses": [
+            "ISC"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "internmap@2.0.3"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2592,
+              "EndLine": 2603
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "d3-color@3.1.0",
+          "Name": "d3-color",
+          "Identifier": {
+            "PURL": "pkg:npm/d3-color@3.1.0",
+            "UID": "348d3189353227ab"
+          },
+          "Version": "3.1.0",
+          "Licenses": [
+            "ISC"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 2604,
+              "EndLine": 2612
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "d3-ease@3.0.1",
+          "Name": "d3-ease",
+          "Identifier": {
+            "PURL": "pkg:npm/d3-ease@3.0.1",
+            "UID": "aed6de3f9b8ec9cd"
+          },
+          "Version": "3.0.1",
+          "Licenses": [
+            "BSD-3-Clause"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 2613,
+              "EndLine": 2621
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "d3-format@3.1.2",
+          "Name": "d3-format",
+          "Identifier": {
+            "PURL": "pkg:npm/d3-format@3.1.2",
+            "UID": "81ae1ffb0ff83a11"
+          },
+          "Version": "3.1.2",
+          "Licenses": [
+            "ISC"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 2622,
+              "EndLine": 2630
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "d3-interpolate@3.0.1",
+          "Name": "d3-interpolate",
+          "Identifier": {
+            "PURL": "pkg:npm/d3-interpolate@3.0.1",
+            "UID": "fd39bf830c743078"
+          },
+          "Version": "3.0.1",
+          "Licenses": [
+            "ISC"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "d3-color@3.1.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2631,
+              "EndLine": 2642
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "d3-path@3.1.0",
+          "Name": "d3-path",
+          "Identifier": {
+            "PURL": "pkg:npm/d3-path@3.1.0",
+            "UID": "84762c4ff4f366a1"
+          },
+          "Version": "3.1.0",
+          "Licenses": [
+            "ISC"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 2643,
+              "EndLine": 2651
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "d3-scale@4.0.2",
+          "Name": "d3-scale",
+          "Identifier": {
+            "PURL": "pkg:npm/d3-scale@4.0.2",
+            "UID": "196f5eff11dcb337"
+          },
+          "Version": "4.0.2",
+          "Licenses": [
+            "ISC"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "d3-array@3.2.4",
+            "d3-format@3.1.2",
+            "d3-interpolate@3.0.1",
+            "d3-time-format@4.1.0",
+            "d3-time@3.1.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2652,
+              "EndLine": 2667
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "d3-shape@3.2.0",
+          "Name": "d3-shape",
+          "Identifier": {
+            "PURL": "pkg:npm/d3-shape@3.2.0",
+            "UID": "bbd1b6f94c22fcb3"
+          },
+          "Version": "3.2.0",
+          "Licenses": [
+            "ISC"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "d3-path@3.1.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2668,
+              "EndLine": 2679
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "d3-time@3.1.0",
+          "Name": "d3-time",
+          "Identifier": {
+            "PURL": "pkg:npm/d3-time@3.1.0",
+            "UID": "985b5ede6b4b0517"
+          },
+          "Version": "3.1.0",
+          "Licenses": [
+            "ISC"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "d3-array@3.2.4"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2680,
+              "EndLine": 2691
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "d3-time-format@4.1.0",
+          "Name": "d3-time-format",
+          "Identifier": {
+            "PURL": "pkg:npm/d3-time-format@4.1.0",
+            "UID": "45e28627973e042f"
+          },
+          "Version": "4.1.0",
+          "Licenses": [
+            "ISC"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "d3-time@3.1.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2692,
+              "EndLine": 2703
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "d3-timer@3.0.1",
+          "Name": "d3-timer",
+          "Identifier": {
+            "PURL": "pkg:npm/d3-timer@3.0.1",
+            "UID": "e155feb9987b4fad"
+          },
+          "Version": "3.0.1",
+          "Licenses": [
+            "ISC"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 2704,
+              "EndLine": 2712
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "decimal.js-light@2.5.1",
+          "Name": "decimal.js-light",
+          "Identifier": {
+            "PURL": "pkg:npm/decimal.js-light@2.5.1",
+            "UID": "6ab170ab593d85fb"
+          },
+          "Version": "2.5.1",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 2752,
+              "EndLine": 2757
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "dom-helpers@5.2.1",
+          "Name": "dom-helpers",
+          "Identifier": {
+            "PURL": "pkg:npm/dom-helpers@5.2.1",
+            "UID": "8310f586c6d3560"
+          },
+          "Version": "5.2.1",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "@babel/runtime@7.29.7",
+            "csstype@3.2.3"
+          ],
+          "Locations": [
+            {
+              "StartLine": 2793,
+              "EndLine": 2802
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "eventemitter3@4.0.7",
+          "Name": "eventemitter3",
+          "Identifier": {
+            "PURL": "pkg:npm/eventemitter3@4.0.7",
+            "UID": "c44a1a921d989dd9"
+          },
+          "Version": "4.0.7",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 3204,
+              "EndLine": 3209
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "fast-equals@5.4.3",
+          "Name": "fast-equals",
+          "Identifier": {
+            "PURL": "pkg:npm/fast-equals@5.4.3",
+            "UID": "9b442c53c2d6ce52"
+          },
+          "Version": "5.4.3",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 3227,
+              "EndLine": 3235
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "internmap@2.0.3",
+          "Name": "internmap",
+          "Identifier": {
+            "PURL": "pkg:npm/internmap@2.0.3",
+            "UID": "2a4297c308400153"
+          },
+          "Version": "2.0.3",
+          "Licenses": [
+            "ISC"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 3602,
+              "EndLine": 3610
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "js-tokens@4.0.0",
+          "Name": "js-tokens",
+          "Identifier": {
+            "PURL": "pkg:npm/js-tokens@4.0.0",
+            "UID": "3fa80cc7f8e3f8fc"
+          },
+          "Version": "4.0.0",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 3648,
+              "EndLine": 3653
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "lodash@4.18.1",
+          "Name": "lodash",
+          "Identifier": {
+            "PURL": "pkg:npm/lodash@4.18.1",
+            "UID": "b7b30072bbd4618c"
+          },
+          "Version": "4.18.1",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 3805,
+              "EndLine": 3810
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "loose-envify@1.4.0",
+          "Name": "loose-envify",
+          "Identifier": {
+            "PURL": "pkg:npm/loose-envify@1.4.0",
+            "UID": "403ff38e429ace75"
+          },
+          "Version": "1.4.0",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "js-tokens@4.0.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 3818,
+              "EndLine": 3829
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "object-assign@4.1.1",
+          "Name": "object-assign",
+          "Identifier": {
+            "PURL": "pkg:npm/object-assign@4.1.1",
+            "UID": "c6df61934b745525"
+          },
+          "Version": "4.1.1",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 3970,
+              "EndLine": 3978
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "prop-types@15.8.1",
+          "Name": "prop-types",
+          "Identifier": {
+            "PURL": "pkg:npm/prop-types@15.8.1",
+            "UID": "e74ed82f410aed76"
+          },
+          "Version": "15.8.1",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "loose-envify@1.4.0",
+            "object-assign@4.1.1",
+            "react-is@16.13.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 4194,
+              "EndLine": 4204
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "react-is@16.13.1",
+          "Name": "react-is",
+          "Identifier": {
+            "PURL": "pkg:npm/react-is@16.13.1",
+            "UID": "cd5985faa92d914c"
+          },
+          "Version": "16.13.1",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 4205,
+              "EndLine": 4210
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "react-is@18.3.1",
+          "Name": "react-is",
+          "Identifier": {
+            "PURL": "pkg:npm/react-is@18.3.1",
+            "UID": "641dbc92261f21f9"
+          },
+          "Version": "18.3.1",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 4328,
+              "EndLine": 4333
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "react-smooth@4.0.4",
+          "Name": "react-smooth",
+          "Identifier": {
+            "PURL": "pkg:npm/react-smooth@4.0.4",
+            "UID": "e75e61b3422a5d12"
+          },
+          "Version": "4.0.4",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "fast-equals@5.4.3",
+            "prop-types@15.8.1",
+            "react-dom@18.3.1",
+            "react-transition-group@4.4.5",
+            "react@18.3.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 4264,
+              "EndLine": 4278
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "react-transition-group@4.4.5",
+          "Name": "react-transition-group",
+          "Identifier": {
+            "PURL": "pkg:npm/react-transition-group@4.4.5",
+            "UID": "4f90c2f272fe494e"
+          },
+          "Version": "4.4.5",
+          "Licenses": [
+            "BSD-3-Clause"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "@babel/runtime@7.29.7",
+            "dom-helpers@5.2.1",
+            "loose-envify@1.4.0",
+            "prop-types@15.8.1",
+            "react-dom@18.3.1",
+            "react@18.3.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 4279,
+              "EndLine": 4294
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "recharts-scale@0.4.5",
+          "Name": "recharts-scale",
+          "Identifier": {
+            "PURL": "pkg:npm/recharts-scale@0.4.5",
+            "UID": "a747a4c746421172"
+          },
+          "Version": "0.4.5",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "decimal.js-light@2.5.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 4319,
+              "EndLine": 4327
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "scheduler@0.23.2",
+          "Name": "scheduler",
+          "Identifier": {
+            "PURL": "pkg:npm/scheduler@0.23.2",
+            "UID": "323af8b717aa2fb4"
+          },
+          "Version": "0.23.2",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "loose-envify@1.4.0"
+          ],
+          "Locations": [
+            {
+              "StartLine": 4431,
+              "EndLine": 4439
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "tiny-invariant@1.3.3",
+          "Name": "tiny-invariant",
+          "Identifier": {
+            "PURL": "pkg:npm/tiny-invariant@1.3.3",
+            "UID": "5e117d81f67d4ef6"
+          },
+          "Version": "1.3.3",
+          "Licenses": [
+            "MIT"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "Locations": [
+            {
+              "StartLine": 4539,
+              "EndLine": 4544
+            }
+          ],
+          "AnalyzedBy": "npm"
+        },
+        {
+          "ID": "victory-vendor@36.9.2",
+          "Name": "victory-vendor",
+          "Identifier": {
+            "PURL": "pkg:npm/victory-vendor@36.9.2",
+            "UID": "34b8c51305fcabb9"
+          },
+          "Version": "36.9.2",
+          "Licenses": [
+            "MIT AND ISC"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "@types/d3-array@3.2.2",
+            "@types/d3-ease@3.0.2",
+            "@types/d3-interpolate@3.0.4",
+            "@types/d3-scale@4.0.9",
+            "@types/d3-shape@3.2.0",
+            "@types/d3-time@3.0.4",
+            "@types/d3-timer@3.0.2",
+            "d3-array@3.2.4",
+            "d3-ease@3.0.1",
+            "d3-interpolate@3.0.1",
+            "d3-scale@4.0.2",
+            "d3-shape@3.2.0",
+            "d3-time@3.1.0",
+            "d3-timer@3.0.1"
+          ],
+          "Locations": [
+            {
+              "StartLine": 4709,
+              "EndLine": 4730
+            }
+          ],
+          "AnalyzedBy": "npm"
+        }
+      ]
+    },
+    {
+      "Target": "infra/docker/python-service.Dockerfile",
+      "Class": "config",
+      "Type": "dockerfile",
+      "MisconfSummary": {
+        "Successes": 24,
+        "Failures": 0
+      }
+    }
+  ]
+}
