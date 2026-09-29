@@ -22,10 +22,24 @@ the first two dashboard views.
 | Location masking | finance role sees 2 dp; operations sees full precision | verified live |
 | Audit trail | an entry per read, with a /24-masked client address | `test_api.py` |
 | Money exactness | `Decimal` end to end, serialised as strings | `test_money_is_serialised_as_a_string` |
-| Web | Fleet Overview + Idle Cost Leaderboard, with assumptions shown on every figure | written; **build not yet run** |
+| Web | Fleet Overview + Idle Cost Leaderboard, with drill-down to individual events | typecheck, lint and build clean; **verified in a browser against live data** |
 
-**Test status:** 432 passed, **85.75% coverage**, gate 80%. `mypy --strict` clean across
-47 modules.
+**Gate 1 is closed.** One telemetry event is traceable through to one cost figure in the
+browser, with its assumptions beside it.
+
+**Test status:** 478 passed, **85.69% coverage**, gate 80%. `mypy --strict` clean across
+47 modules; web typecheck, lint and build clean.
+
+### Pipeline re-run after the fixes below
+
+| Metric | Simulator generated | Processor detected |
+|---|---|---|
+| Events | 294,316 | 294,316 consumed |
+| **Excessive idle (alerts)** | **83** | **83 — exact** |
+| Billable idle periods | 272 | 271 |
+| Accounting | - | 284,502 + 2,845 + 5,437 + 1,532 = 294,316 |
+
+D2 cross-check across 264 priced segments: **median divergence 2.6%**, 100% within 15%.
 
 ### Findings worth keeping
 
@@ -48,19 +62,26 @@ the first two dashboard views.
   limiting and caching, neither of which the API needs to answer correctly, so losing it
   must not pull an instance out of the load balancer.
 
-### Not yet done in this session
-
-`npm install` and the web build have **not been run**: the sandbox tooling stopped
-authorising shell commands partway through. The TypeScript is written and reviewed but
-**unverified** - it has not been type-checked, linted or built, so treat it as untested
-until `npm install && npm run typecheck && npm run build` passes. Nothing since the API
-work has been committed either.
+- **The Dockerfile's workspace list drifted from the uv workspace.** Adding
+  `services/oidc_stub` as a member left the image's hand-maintained list behind, and the
+  only symptom was an opaque `uv sync --frozen` exit code 2 at image build time -
+  discovered while rebuilding for the demo, which is the worst possible moment.
+  `tests/test_dockerfile_workspace.py` now asserts the two agree.
+- **The simulator's default start date put most events in the future.** It defaulted to
+  *today* 05:00Z and generates a working day forward, so a run at 06:59 UTC sent **72%
+  of events to the DLQ** as `timestamp_too_far_future`. The guard was right; the default
+  was wrong. It now defaults to yesterday and warns when a chosen window reaches into
+  the future. Worth noting that the DLQ reason codes made this diagnosable in one query
+  rather than a debugging session - which is the argument for having them.
+- **CORS was on the API but not the OIDC stub**, so the dashboard's sign-in failed at
+  the browser. A real provider would not need it (the authorization-code flow uses
+  redirects, which CORS does not apply to), so this is a property of the stub alone.
 
 ### Next
 
-1. `npm install`, typecheck, build, and screenshot the two views against live data.
-2. Commit the API, OIDC stub and web work.
-3. Remaining three views, utilisation rollups, erasure flow, BDD scenarios.
+1. Remaining three views: Vehicle Detail, Utilisation, Attention/Alerts.
+2. Utilisation rollups (D3 wired into `services/batch`), late-event reconciliation (D6).
+3. Right-to-erasure flow across all four stores, and BDD acceptance scenarios.
 
 ---
 
