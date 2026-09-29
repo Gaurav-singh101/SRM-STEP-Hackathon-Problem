@@ -13,10 +13,18 @@ dependencies = [
     "fleet-processor",
     "fleet-api",
     "fleet-batch",
+    "fleet-oidc-stub",
 ]
 
 [tool.uv.workspace]
-members = ["libs/fleet_common", "services/simulator", "services/processor", "services/api", "services/batch"]
+members = [
+    "libs/fleet_common",
+    "services/simulator",
+    "services/processor",
+    "services/api",
+    "services/batch",
+    "services/oidc_stub",
+]
 
 [tool.uv.sources]
 fleet-common = { workspace = true }
@@ -24,6 +32,7 @@ fleet-simulator = { workspace = true }
 fleet-processor = { workspace = true }
 fleet-api = { workspace = true }
 fleet-batch = { workspace = true }
+fleet-oidc-stub = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -45,7 +54,14 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["libs/fleet_common", "services/simulator", "services/processor", "services/api", "services/batch"]
+src = [
+    "libs/fleet_common",
+    "services/simulator",
+    "services/processor",
+    "services/api",
+    "services/batch",
+    "services/oidc_stub",
+]
 extend-exclude = ["docs/source", ".venv"]
 
 [tool.ruff.lint]
@@ -100,6 +116,7 @@ files = [
     "services/processor/processor",
     "services/api/api",
     "services/batch/batch",
+    "services/oidc_stub/oidc_stub",
 ]
 
 [[tool.mypy.overrides]]
@@ -116,6 +133,7 @@ testpaths = [
     "services/processor/tests",
     "services/api/tests",
     "services/batch/tests",
+    "services/oidc_stub/tests",
     "tests",
 ]
 asyncio_mode = "auto"
@@ -138,6 +156,7 @@ source = [
     "services/processor/processor",
     "services/api/api",
     "services/batch/batch",
+    "services/oidc_stub/oidc_stub",
 ]
 omit = [
     "*/tests/*",

@@ -48,3 +48,6 @@ Thumbs.db
 *.log
 .idea/
 .vscode/
+
+# Vite build output
+web/dist/

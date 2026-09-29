@@ -27,6 +27,7 @@ from typing import Any, Final
 
 import numpy as np
 
+from fleet_common.domain.fuel import BevHasNoIdleFuelError, idle_burn_rate_lph
 from fleet_common.events import SCHEMA_VERSION, Ignition
 from simulator.fleet import DutyCycle, SyntheticVehicle
 
@@ -95,6 +96,12 @@ class _VehicleState:
     odometer_km: float
     engine_hours: float
     fuel_level_pct: float
+    #: The vehicle's configured idle burn rate, or None for a BEV. The device-reported
+    #: fuel_rate_lph is generated around this value so the D2 measured cross-check is
+    #: meaningful. An unrelated rate made the cross-check report roughly 60% divergence
+    #: on every segment - noise rather than a signal, and it would invite the obvious
+    #: question of why the system disagrees with itself.
+    idle_burn_rate_lph: float | None = None
     seq: int = 0
     lat: float = 0.0
     lon: float = 0.0
@@ -128,6 +135,22 @@ class DaySummary:
     out_of_order_injected: int
     malformed_injected: int
     samples_dropped: int
+
+
+def _configured_idle_rate(vehicle: SyntheticVehicle) -> float | None:
+    """The vehicle's configured idle burn rate, or None for a BEV.
+
+    Read from the cost engine's own table rather than duplicated, so the telemetry the
+    simulator emits and the estimate the processor computes rest on the same number.
+    Returns None for a pair with no configured rate: the roster should never produce
+    one, but generating telemetry is not the place to fail if it somehow does.
+    """
+    if not vehicle.powertrain.burns_fuel:
+        return None
+    try:
+        return idle_burn_rate_lph(vehicle.powertrain, vehicle.vehicle_class)
+    except (BevHasNoIdleFuelError, KeyError):
+        return None
 
 
 def _idle_plan(
@@ -177,6 +200,7 @@ def generate_day(
         fuel_level_pct=float(rng.integers(20, 95)),
         lat=vehicle.depot_lat,
         lon=vehicle.depot_lon,
+        idle_burn_rate_lph=_configured_idle_rate(vehicle),
     )
 
     low, high = TRIPS_PER_DAY[vehicle.duty_cycle]
@@ -292,6 +316,34 @@ def _emit_stop(
     return cursor
 
 
+#: Sensor noise on the reported consumption rate, as a fraction of the true value.
+#: Real flow meters are not exact, and a perfectly clean signal would make the D2
+#: cross-check a tautology rather than a check.
+FUEL_RATE_NOISE_SIGMA: Final[float] = 0.08
+
+
+def _fuel_rate(
+    state: _VehicleState, speed_kph: float, engine_on: bool, rng: np.random.Generator
+) -> float:
+    """Device-reported instantaneous consumption, in litres/hour.
+
+    Built around the vehicle's *configured* idle burn rate so the measured cross-check
+    compares like with like: a few percent of divergence normally, and a large
+    divergence only when the configured rate is genuinely wrong.
+
+    Under load the rate rises with speed, which is why a moving sample reports far more
+    than an idling one.
+    """
+    if not engine_on:
+        return 0.0
+    base = state.idle_burn_rate_lph
+    if base is None:
+        return 0.0
+    load_factor = 1.0 + speed_kph * 0.055
+    noisy = base * load_factor * (1.0 + float(rng.normal(0.0, FUEL_RATE_NOISE_SIGMA)))
+    return round(max(0.0, noisy), 2)
+
+
 def _append(
     events: list[dict[str, Any]],
     vehicle: SyntheticVehicle,
@@ -340,8 +392,7 @@ def _append(
     # the vehicle master and let a BEV acquire a fuel cost (D9).
     if vehicle.powertrain.burns_fuel:
         event["fuel_level_pct"] = round(state.fuel_level_pct, 1)
-        # Idle burn is small but non-zero; this feeds the D2 measured cross-check.
-        event["fuel_rate_lph"] = round((0.9 + speed_kph * 0.06) if engine_on else 0.0, 2)
+        event["fuel_rate_lph"] = _fuel_rate(state, speed_kph, engine_on, rng)
         event["soc_pct"] = None
     else:
         event["fuel_level_pct"] = None

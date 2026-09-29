@@ -37,14 +37,20 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
-# Dependency metadata first, so the expensive install layer is cached and only
-# reruns when the lockfile actually changes - not on every source edit.
+# Dependency metadata first, so the expensive install layer is cached and only reruns
+# when the lockfile actually changes - not on every source edit. That caching is the
+# reason the workspace members are listed explicitly rather than copied wholesale.
+#
+# This list must track [tool.uv.workspace] in the root pyproject.toml. It silently did
+# not once, and the symptom was an opaque `uv sync` failure at image build time, so
+# tests/test_dockerfile_workspace.py now asserts the two agree.
 COPY pyproject.toml uv.lock ./
 COPY libs/fleet_common/pyproject.toml libs/fleet_common/
 COPY services/simulator/pyproject.toml services/simulator/
 COPY services/processor/pyproject.toml services/processor/
 COPY services/api/pyproject.toml services/api/
 COPY services/batch/pyproject.toml services/batch/
+COPY services/oidc_stub/pyproject.toml services/oidc_stub/
 
 # --frozen: fail if the lockfile does not match pyproject, rather than silently
 # resolving something different from what CI tested.
@@ -54,11 +60,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
              services/processor/processor \
              services/api/api \
              services/batch/batch \
+             services/oidc_stub/oidc_stub \
  && touch libs/fleet_common/fleet_common/__init__.py \
           services/simulator/simulator/__init__.py \
           services/processor/processor/__init__.py \
           services/api/api/__init__.py \
           services/batch/batch/__init__.py \
+          services/oidc_stub/oidc_stub/__init__.py \
  && uv sync --all-packages --frozen --no-dev
 
 # Now the sources, plus the schema directory: schemas/ is the single source of

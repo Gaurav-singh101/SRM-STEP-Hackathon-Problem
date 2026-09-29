@@ -40,7 +40,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--start",
         type=str,
         default=None,
-        help="ISO start instant for the first simulated day (default: today 05:00Z)",
+        help="ISO start instant for the first simulated day (default: yesterday 05:00Z)",
     )
     parser.add_argument(
         "--dry-run",
@@ -52,14 +52,49 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+#: A generated working day spans up to about 18 hours from its start.
+SIMULATED_DAY_SPAN = timedelta(hours=18)
+
+
 def _resolve_start(raw: str | None) -> datetime:
+    """Resolve the first simulated day's start instant.
+
+    Defaults to **yesterday** at 05:00 UTC, not today. A generated day runs forward for
+    up to 18 hours, so starting it at 05:00 today puts most of the events in the future,
+    and the processor rejects anything more than a few minutes ahead as a broken device
+    clock. Starting yesterday guarantees the whole day is in the past whatever time the
+    simulator is run at.
+
+    This is not hypothetical: running at 06:59 UTC with a today start sent 72% of events
+    to the DLQ as `timestamp_too_far_future`.
+    """
     if raw is None:
-        today = datetime.now(UTC).date()
-        return datetime(today.year, today.month, today.day, 5, 0, 0, tzinfo=UTC)
+        yesterday = (datetime.now(UTC) - timedelta(days=1)).date()
+        return datetime(yesterday.year, yesterday.month, yesterday.day, 5, 0, 0, tzinfo=UTC)
+
     parsed = datetime.fromisoformat(raw)
     if parsed.tzinfo is None:
         raise SystemExit("--start must include a timezone offset, e.g. 2026-09-29T05:00:00Z")
     return parsed.astimezone(UTC)
+
+
+def _warn_if_start_reaches_the_future(start: datetime, days: int) -> None:
+    """Warn when the chosen window would generate future-dated events.
+
+    The processor would reject them, and a 70% DLQ rate is far harder to diagnose
+    after the fact than a line of output before the run.
+    """
+    latest = start + timedelta(days=days - 1) + SIMULATED_DAY_SPAN
+    now = datetime.now(UTC)
+    if latest <= now:
+        return
+    ahead = latest - now
+    print(
+        f"WARNING: this window generates events up to {ahead} in the future. "
+        "The processor rejects anything more than a few minutes ahead as a broken "
+        "device clock, so those events will land in the DLQ. Pass an earlier --start.",
+        file=sys.stderr,
+    )
 
 
 def _batched(events: list[dict[str, Any]], size: int) -> Iterator[list[dict[str, Any]]]:
@@ -70,6 +105,7 @@ def _batched(events: list[dict[str, Any]], size: int) -> Iterator[list[dict[str,
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     start = _resolve_start(args.start)
+    _warn_if_start_reaches_the_future(start, args.days)
 
     print(f"Building roster: {args.vehicles:,} vehicles, seed {args.seed}")
     roster_began = time.perf_counter()

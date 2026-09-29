@@ -4,6 +4,66 @@ Session handoff record (CLAUDE.md S17). Newest first.
 
 ---
 
+## 2026-09-29 - Day 1 continued: API and dashboard
+
+The Solution Document Template was supplied, closing gap G13. Built the API layer and
+the first two dashboard views.
+
+### Done and verified against the live stack
+
+| Area | State | Evidence |
+|---|---|---|
+| Keyset pagination | Opaque cursors, capped page size, no total count | 32 tests, 4 property-based |
+| RFC 7807 errors | Typed errors, correlation id, no leaked detail | verified over HTTP |
+| OIDC/JWT (D4) | Local stub issues real RS256; API verifies through the production path | token minted and verified |
+| Algorithm allow-list | `none` and HMAC refused at settings load *and* at verification | `test_settings.py` |
+| API endpoints | summary, trend, idle-events, leaderboard, vehicle detail, healthz, readyz | all exercised with a real token |
+| Tenant isolation over HTTP | tenant-second gets **404** for a tenant-demo VIN, not 403 | verified live |
+| Location masking | finance role sees 2 dp; operations sees full precision | verified live |
+| Audit trail | an entry per read, with a /24-masked client address | `test_api.py` |
+| Money exactness | `Decimal` end to end, serialised as strings | `test_money_is_serialised_as_a_string` |
+| Web | Fleet Overview + Idle Cost Leaderboard, with assumptions shown on every figure | written; **build not yet run** |
+
+**Test status:** 432 passed, **85.75% coverage**, gate 80%. `mypy --strict` clean across
+47 modules.
+
+### Findings worth keeping
+
+- **A pydantic `computed_field` on the API summary reported the wrong formula version.**
+  `max(formula_version)` picked the BEV placeholder `'unpriced'`, which sorts after
+  `'idle-fuel-v1'`, so a user-facing figure misreported the very thing that field exists
+  to disclose. Now restricted to priced rows.
+- **`ON CONFLICT` against a PARTIAL unique index must repeat the index predicate**,
+  otherwise Postgres cannot infer the index and the insert fails outright.
+- **The simulator's reported fuel rate did not match the configured burn rates.** It
+  emitted a flat ~0.9 L/h while a medium truck is configured at 2.4 L/h, so the D2
+  cross-check reported roughly 60% divergence on *every* segment - noise rather than a
+  signal, and an obvious question for a reviewer. The rate now derives from the same
+  burn-rate table, giving a median divergence of **+2.3%** with 100% of segments inside
+  ±15%.
+- **Docker Desktop stopped mid-session**, and the symptom was `readyz` reporting both
+  stores down rather than anything about Docker. Restarted from its per-user install
+  path; the volumes kept all data.
+- **`readyz` returns *degraded*, not *unready*, without Redis.** Redis backs rate
+  limiting and caching, neither of which the API needs to answer correctly, so losing it
+  must not pull an instance out of the load balancer.
+
+### Not yet done in this session
+
+`npm install` and the web build have **not been run**: the sandbox tooling stopped
+authorising shell commands partway through. The TypeScript is written and reviewed but
+**unverified** - it has not been type-checked, linted or built, so treat it as untested
+until `npm install && npm run typecheck && npm run build` passes. Nothing since the API
+work has been committed either.
+
+### Next
+
+1. `npm install`, typecheck, build, and screenshot the two views against live data.
+2. Commit the API, OIDC stub and web work.
+3. Remaining three views, utilisation rollups, erasure flow, BDD scenarios.
+
+---
+
 ## 2026-09-29 - Day 1 continued: end-to-end pipeline working
 
 `simulator -> Kafka -> processor -> PostgreSQL + MongoDB + Redis` runs end to end, and

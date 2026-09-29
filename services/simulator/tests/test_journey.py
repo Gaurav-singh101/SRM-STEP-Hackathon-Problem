@@ -222,14 +222,59 @@ def test_combustion_vehicle_reports_fuel_not_state_of_charge() -> None:
         assert event["soc_pct"] is None
 
 
+def _idling_samples_for_a_combustion_vehicle(
+    seed: int, *, scan: int = 40
+) -> list[dict[str, object]]:
+    """Find idling samples from any combustion vehicle in the roster.
+
+    Scans rather than taking the first match: an individual vehicle may legitimately
+    produce no idling in a day - an under-used asset often makes no trips at all - so
+    asserting on one arbitrary vehicle is a flaky test rather than a real check.
+    """
+    rng = np.random.default_rng(seed)
+    for vehicle in build_fleet(vehicle_count=3_000, seed=seed):
+        if not vehicle.powertrain.burns_fuel:
+            continue
+        events, _ = generate_day(vehicle, DAY_START, rng=rng, config=CLEAN)
+        idling = [
+            e for e in events if e["ignition"] == Ignition.ON.value and float(e["speed_kph"]) < 2.0
+        ]
+        if idling:
+            return idling
+        scan -= 1
+        if scan <= 0:
+            break
+    pytest.fail("no combustion vehicle in the scanned roster produced idling samples")
+
+
 def test_idling_vehicle_reports_a_non_zero_fuel_rate() -> None:
     """Feeds the D2 measured cross-check. A zero rate while idling would make the
     cross-check falsely contradict the configured burn rate."""
-    vehicle = _vehicle_with(Powertrain.DIESEL, seed=23)
-    events, _ = generate_day(vehicle, DAY_START, rng=np.random.default_rng(23), config=CLEAN)
-    idling = [e for e in events if e["ignition"] == Ignition.ON.value and e["speed_kph"] < 2.0]
-    assert idling, "no idling samples generated"
-    assert all(e["fuel_rate_lph"] > 0 for e in idling)
+    idling = _idling_samples_for_a_combustion_vehicle(seed=23)
+    assert all(float(e["fuel_rate_lph"]) > 0 for e in idling)
+
+
+def test_reported_idle_rate_matches_the_configured_burn_rate() -> None:
+    """The reported rate must sit near the configured one, or the D2 cross-check is
+    noise instead of a check.
+
+    Before this was fixed the simulator emitted an unrelated ~0.9 L/h while a medium
+    truck is configured at 2.4 L/h, so every segment reported roughly 60% divergence
+    and the cross-check said nothing useful.
+    """
+    idling = _idling_samples_for_a_combustion_vehicle(seed=31)
+    rates = [float(e["fuel_rate_lph"]) for e in idling]
+    mean_rate = sum(rates) / len(rates)
+
+    from fleet_common.domain.fuel import IDLE_BURN_RATES_LPH
+
+    configured = set(IDLE_BURN_RATES_LPH.values())
+    closest = min(configured, key=lambda r: abs(r - mean_rate))
+    divergence = abs(mean_rate - closest) / closest
+    assert divergence < 0.25, (
+        f"mean reported idle rate {mean_rate:.2f} L/h is {divergence:.0%} from the "
+        f"nearest configured rate {closest} L/h"
+    )
 
 
 def test_engine_off_samples_report_no_consumption() -> None:
