@@ -12,7 +12,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { api } from '../api/client';
-import type { UtilisationEntry } from '../api/types';
+import type { UtilisationCoverage, UtilisationEntry } from '../api/types';
 import {
   Badge,
   DataTable,
@@ -75,6 +75,7 @@ export function Utilisation(): ReactNode {
     return (
       <>
         <BandFilterControl value={band} onChange={setBand} />
+        <CoverageNotice coverage={utilisation.data.coverage} />
         <EmptyState
           title={
             band === 'all'
@@ -97,11 +98,7 @@ export function Utilisation(): ReactNode {
     <>
       <BandFilterControl value={band} onChange={setBand} />
 
-      <p className="notice notice--info">
-        Vehicles with no telemetry in the window are <strong>not scored</strong>. A
-        failed telematics unit sends nothing, and reporting that as an idle asset would
-        send someone to sell a vehicle that is working perfectly well.
-      </p>
+      <CoverageNotice coverage={utilisation.data.coverage} />
 
       <DataTable
         caption={`Utilisation over the last ${first?.window_days ?? 30} days, lowest first`}
@@ -202,5 +199,65 @@ function BandFilterControl({
         </select>
       </label>
     </div>
+  );
+}
+
+/**
+ * States how much of the fleet was actually scored.
+ *
+ * Present because the table alone implies the fleet is the list. It is not: a run where
+ * most vehicles had no usable telemetry still fills a page with the few that did, and
+ * without this line that page reads as a complete picture of the fleet.
+ *
+ * The two unscored counts are never added together. "No telemetry" is a thing to chase;
+ * "class too small" is a limit of the method. One number covering both would prompt the
+ * wrong action.
+ */
+function CoverageNotice({
+  coverage,
+}: {
+  coverage: UtilisationCoverage | null;
+}): ReactNode {
+  if (!coverage) {
+    // Not rendered as zero. "No window has been scored" and "every vehicle was scored"
+    // are different statements, and showing the second for the first is the misreading
+    // this component exists to prevent.
+    return (
+      <p className="notice notice--info">
+        No utilisation window has been scored yet, so coverage is unknown. Run{' '}
+        <code>python -m batch utilisation</code> to produce one.
+      </p>
+    );
+  }
+
+  const { vehicles_active, scored, unscored_no_telemetry, unscored_class_too_small } =
+    coverage;
+  const percent = vehicles_active > 0 ? Math.round((scored / vehicles_active) * 100) : 0;
+
+  return (
+    <p className="notice notice--info">
+      <strong>
+        {scored.toLocaleString()} of {vehicles_active.toLocaleString()} active vehicles
+        scored ({percent}%)
+      </strong>{' '}
+      over {coverage.window_days} days to {coverage.window_end}.
+      {unscored_no_telemetry > 0 && (
+        <>
+          {' '}
+          {unscored_no_telemetry.toLocaleString()} had no usable telemetry and are{' '}
+          <strong>not scored</strong> &mdash; a failed telematics unit sends nothing, and
+          reporting that as an idle asset would send someone to sell a vehicle that is
+          working perfectly well.
+        </>
+      )}
+      {unscored_class_too_small > 0 && (
+        <>
+          {' '}
+          {unscored_class_too_small.toLocaleString()} sit in a vehicle class with too few
+          peers for a usable baseline, so they were skipped rather than scored against
+          noise.
+        </>
+      )}
+    </p>
   );
 }

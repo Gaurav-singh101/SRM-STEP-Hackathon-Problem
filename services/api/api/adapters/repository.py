@@ -157,6 +157,24 @@ class UtilisationRow:
 
 
 @dataclass(frozen=True, slots=True)
+class UtilisationWindowRow:
+    """How much of the fleet the latest utilisation window could score.
+
+    Read rather than derived. "Active vehicles without a score row" would collapse two
+    different causes - no telemetry, and a class with too few peers - into one number
+    that answers neither question, so the batch job records what it observed.
+    """
+
+    window_end: date
+    window_days: int
+    vehicles_active: int
+    scored: int
+    unscored_no_telemetry: int
+    unscored_class_too_small: int
+    formula_version: str
+
+
+@dataclass(frozen=True, slots=True)
 class AlertRow:
     """One alert needing attention."""
 
@@ -732,6 +750,39 @@ class FleetRepository:
             abnormal_reason=str(abnormal_reason) if abnormal_reason else None,
             baseline_sample_size=int(baseline_sample_size),
             formula_version=str(formula_version),
+        )
+
+    def utilisation_coverage(self, principal: Principal) -> UtilisationWindowRow | None:
+        """Accounting for the most recent scored window, or ``None`` if none exists.
+
+        ``None`` rather than a row of zeros: "no window has been scored yet" and "every
+        vehicle was scored" are different statements, and the second one shown in place
+        of the first is the exact misreading this table was added to prevent.
+        """
+        with self._scoped(principal) as cur:
+            cur.execute(
+                """
+                SELECT window_end, window_days, vehicles_active, scored,
+                       unscored_no_telemetry, unscored_class_too_small, formula_version
+                FROM utilisation_window
+                WHERE tenant_id = %(tenant_id)s
+                ORDER BY window_end DESC
+                LIMIT 1
+                """,
+                {"tenant_id": principal.tenant_id},
+            )
+            row = cur.fetchone()
+
+        if row is None:
+            return None
+        return UtilisationWindowRow(
+            window_end=row[0],
+            window_days=int(row[1]),
+            vehicles_active=int(row[2]),
+            scored=int(row[3]),
+            unscored_no_telemetry=int(row[4]),
+            unscored_class_too_small=int(row[5]),
+            formula_version=str(row[6]),
         )
 
     # ----------------------------------------------------------------- alerts

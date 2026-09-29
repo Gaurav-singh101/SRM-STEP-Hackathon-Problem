@@ -36,6 +36,7 @@ from api.schemas import (
     ReadyResponse,
     TrendPoint,
     TrendResponse,
+    UtilisationCoverage,
     UtilisationEntry,
     UtilisationPage,
     VehicleResponse,
@@ -438,6 +439,7 @@ def create_app() -> FastAPI:
             correlation_id=ctx.correlation_id,
             client_ip_masked=ctx.client_ip_masked,
         )
+        coverage = repo.utilisation_coverage(ctx.principal)
         return UtilisationPage(
             items=[UtilisationEntry.from_row(row) for row in page.items],
             page=PageMeta(
@@ -446,6 +448,7 @@ def create_app() -> FastAPI:
                 returned=page.size,
                 has_more=page.has_more,
             ),
+            coverage=UtilisationCoverage.from_row(coverage) if coverage else None,
         )
 
     @app.get(

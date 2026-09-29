@@ -24,6 +24,7 @@ from api.adapters.repository import (
     IdleEventRow,
     LeaderboardRow,
     UtilisationRow,
+    UtilisationWindowRow,
     VehicleDetail,
 )
 
@@ -369,14 +370,47 @@ class UtilisationEntry(_Base):
         )
 
 
+class UtilisationCoverage(_Base):
+    """How much of the fleet this window could actually score.
+
+    Present so the page cannot imply every vehicle was scored. The two unscored counts
+    are kept apart because they mean different things and lead to different actions:
+    chase a silent telematics unit, or accept that a small class has no usable peer
+    group.
+    """
+
+    window_end: date
+    window_days: int
+    vehicles_active: int
+    scored: int
+    #: No usable activity reached us. **Not** the same as unused: a failed telematics
+    #: unit and a genuinely parked vehicle both send nothing, and scoring either as idle
+    #: would tell a fleet manager to sell a van that works.
+    unscored_no_telemetry: int
+    #: In a vehicle class with fewer peers than a baseline needs, so skipped rather than
+    #: scored against noise.
+    unscored_class_too_small: int
+    formula_version: str
+
+    @classmethod
+    def from_row(cls, row: UtilisationWindowRow) -> UtilisationCoverage:
+        return cls(
+            window_end=row.window_end,
+            window_days=row.window_days,
+            vehicles_active=row.vehicles_active,
+            scored=row.scored,
+            unscored_no_telemetry=row.unscored_no_telemetry,
+            unscored_class_too_small=row.unscored_class_too_small,
+            formula_version=row.formula_version,
+        )
+
+
 class UtilisationPage(_Base):
     items: list[UtilisationEntry]
     page: PageMeta
-    #: Vehicles with no telemetry are NOT scored. They are not under-used; we have no
-    #: data, and reporting them as idle assets would send someone to sell a working
-    #: vehicle. Surfaced so the UI can explain the gap rather than show a silent
-    #: shortfall against the fleet size.
-    unscored_no_telemetry: int = 0
+    #: ``None`` when no window has been scored yet, which is a different statement from
+    #: "every vehicle was scored" and must not be rendered as zero.
+    coverage: UtilisationCoverage | None = None
 
 
 class AlertEntry(_Base):

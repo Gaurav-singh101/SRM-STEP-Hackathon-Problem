@@ -22,9 +22,12 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 from api.adapters.repository import (
+    AlertRow,
     FleetSummary,
     IdleEventRow,
     LeaderboardRow,
+    UtilisationRow,
+    UtilisationWindowRow,
     VehicleDetail,
 )
 from api.deps import Authenticator, RateLimiter
@@ -41,45 +44,6 @@ NOW = datetime(2026, 9, 29, 12, 0, 0, tzinfo=UTC)
 #: Precise coordinates, so masking is observable in the response.
 PRECISE_LAT = 12.971598
 PRECISE_LON = 77.594562
-
-
-def signing_key() -> rsa.RSAPrivateKey:
-    """One key pair for the whole session: generation is the slow part."""
-    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
-
-
-def make_token(signing_key: rsa.RSAPrivateKey) -> Any:
-    """Mint a genuinely RS256-signed token for a tenant and role."""
-    auth = auth_settings()
-
-    def _make(
-        *,
-        tenant_id: str = TENANT_A,
-        role: Role = Role.FINANCE_MANAGER,
-        subject: str = "test-user",
-        ttl_seconds: int = 3600,
-        audience: str | None = None,
-        issuer: str | None = None,
-        omit: tuple[str, ...] = (),
-        algorithm: str = "RS256",
-    ) -> str:
-        issued = int(time.time())
-        claims: dict[str, Any] = {
-            "sub": subject,
-            "iss": issuer or auth.oidc_issuer,
-            "aud": audience or auth.oidc_audience,
-            "iat": issued,
-            "nbf": issued,
-            "exp": issued + ttl_seconds,
-            "jti": str(uuid.uuid4()),
-            "tenant_id": tenant_id,
-            "role": role.value,
-        }
-        for claim in omit:
-            claims.pop(claim, None)
-        return jwt.encode(claims, signing_key, algorithm=algorithm, headers={"kid": "test-key"})
-
-    return _make
 
 
 class _StaticJwks:
@@ -141,6 +105,142 @@ def make_idle_row(
     )
 
 
+def make_leaderboard_row(
+    *,
+    vin: str = "ZZAAAAAAAAAAAAAAA",
+    registration: str = "KA01AA0001",
+    total_cost: Decimal = Decimal("1250.5000"),
+    idle_event_count: int = 9,
+    excessive_count: int = 4,
+    total_idle_hours: float = 3.5,
+    powertrain: str = "ICE",
+) -> LeaderboardRow:
+    return LeaderboardRow(
+        vin=vin,
+        registration=registration,
+        vehicle_class="LCV",
+        powertrain=powertrain,
+        fleet_name="Bengaluru South",
+        idle_event_count=idle_event_count,
+        excessive_count=excessive_count,
+        total_idle_hours=total_idle_hours,
+        total_fuel_litres=5.25,
+        total_cost=total_cost,
+        currency="INR",
+    )
+
+
+def make_utilisation_row(
+    *,
+    vin: str = "ZZAAAAAAAAAAAAAAA",
+    score: float = 18.4,
+    band: str = "low",
+    active_day_component: float = 0.20,
+    moving_hours_component: float = 0.18,
+    distance_component: float = 0.22,
+    abnormal_reason: str | None = None,
+    baseline_sample_size: int = 240,
+) -> UtilisationRow:
+    components = (active_day_component, moving_hours_component, distance_component)
+    return UtilisationRow(
+        vin=vin,
+        registration="KA01AA0001",
+        vehicle_class="LCV",
+        powertrain="ICE",
+        fleet_name="Bengaluru South",
+        window_end=NOW.date(),
+        window_days=30,
+        score=score,
+        band=band,
+        active_day_component=active_day_component,
+        moving_hours_component=moving_hours_component,
+        distance_component=distance_component,
+        idle_share=0.31,
+        component_spread=max(components) - min(components),
+        abnormal_reason=abnormal_reason,
+        baseline_sample_size=baseline_sample_size,
+        formula_version="utilisation-v1",
+    )
+
+
+def make_alert_row(
+    *,
+    alert_id: int = 1,
+    vin: str = "ZZAAAAAAAAAAAAAAA",
+    alert_type: str = "excessive_idle",
+    severity: str = "warning",
+    triggering_event_ts: datetime | None = None,
+    ingest_lag_seconds: float = 1.0,
+    processing_seconds: float = 0.8,
+    acknowledged: bool = False,
+) -> AlertRow:
+    """An alert whose two latency figures can be set independently.
+
+    Separately, because that is the distinction the view exists to preserve: a replayed
+    day has a huge end-to-end figure and a small processing figure, and quoting the first
+    as a reaction time is the mistake this was written to prevent.
+    """
+    event_ts = triggering_event_ts or NOW
+    ingest_ts = event_ts + timedelta(seconds=ingest_lag_seconds)
+    return AlertRow(
+        alert_id=alert_id,
+        vin=vin,
+        registration="KA01AA0001",
+        alert_type=alert_type,
+        severity=severity,
+        triggering_event_ts=event_ts,
+        ingest_ts=ingest_ts,
+        persisted_at=ingest_ts + timedelta(seconds=processing_seconds),
+        idle_event_started_at=event_ts - timedelta(seconds=600),
+        detail={"duration_seconds": 780.0, "threshold_seconds": 600},
+        acknowledged_at=NOW if acknowledged else None,
+    )
+
+
+def make_vehicle_detail(
+    *,
+    vin: str = "ZZAAAAAAAAAAAAAAA",
+    tenant_id: str = TENANT_A,
+    powertrain: str = "ICE",
+    burns_fuel: bool = True,
+    total_cost: Decimal | None = Decimal("1250.5000"),
+) -> VehicleDetail:
+    return VehicleDetail(
+        vin=vin,
+        registration="KA01AA0001",
+        tenant_id=tenant_id,
+        fleet_name="Bengaluru South",
+        vehicle_class="LCV",
+        powertrain=powertrain,
+        fuel_type="diesel" if burns_fuel else None,
+        model_year=2022,
+        is_active=True,
+        burns_fuel=burns_fuel,
+        idle_event_count=9,
+        total_idle_hours=3.5,
+        total_cost=total_cost,
+        currency="INR" if total_cost is not None else None,
+    )
+
+
+def make_coverage(
+    *,
+    vehicles_active: int = 2000,
+    scored: int = 180,
+    unscored_no_telemetry: int = 1808,
+    unscored_class_too_small: int = 12,
+) -> UtilisationWindowRow:
+    return UtilisationWindowRow(
+        window_end=NOW.date(),
+        window_days=30,
+        vehicles_active=vehicles_active,
+        scored=scored,
+        unscored_no_telemetry=unscored_no_telemetry,
+        unscored_class_too_small=unscored_class_too_small,
+        formula_version="utilisation-v1",
+    )
+
+
 @dataclass
 class FakeRepository:
     """In-memory stand-in with the same surface as ``FleetRepository``.
@@ -153,6 +253,9 @@ class FakeRepository:
     vehicles: dict[str, VehicleDetail] = field(default_factory=dict)
     leaderboard: list[LeaderboardRow] = field(default_factory=list)
     summary: FleetSummary | None = None
+    utilisation_rows: list[UtilisationRow] = field(default_factory=list)
+    alert_rows: list[AlertRow] = field(default_factory=list)
+    coverage: UtilisationWindowRow | None = None
     audit_calls: list[dict[str, Any]] = field(default_factory=list)
     postgres_ready: bool = True
     #: Set to coarsen coordinates, mirroring what the real repository does per role.
@@ -261,38 +364,39 @@ class FakeRepository:
     ) -> list[tuple[Any, float, Decimal]]:
         return [(NOW.date(), 5.5, Decimal("512.2500"))]
 
+    def list_utilisation(
+        self,
+        principal: Principal,
+        *,
+        page_size: int,
+        cursor: Cursor | None = None,
+        bands: tuple[str, ...] = (),
+    ) -> Page[UtilisationRow]:
+        # Worst first, mirroring the real query's ORDER BY score ASC: the point of the
+        # view is the vehicles at the bottom, so they belong on the first page.
+        rows = sorted(self.utilisation_rows, key=lambda r: (r.score, r.vin))
+        if bands:
+            rows = [r for r in rows if r.band in bands]
+        if cursor is not None:
+            anchor = (float(cursor.sort_value), cursor.tie_break)
+            rows = [r for r in rows if (r.score, r.vin) > anchor]
+        return build_page(
+            rows[: page_size + 1],
+            page_size=page_size,
+            cursor_of=lambda r: Cursor.with_tie_break(str(r.score), r.vin),
+        )
 
-def repo() -> FakeRepository:
-    return FakeRepository(idle_rows=[make_idle_row()])
+    def utilisation_coverage(self, principal: Principal) -> UtilisationWindowRow | None:
+        return self.coverage
 
-
-def client(repo: FakeRepository, signing_key: rsa.RSAPrivateKey) -> Iterator[TestClient]:
-    """A TestClient wired to the fake repository and a real token verifier."""
-    app = create_app()
-
-    verifier = TokenVerifier(auth_settings(), jwks=_StaticJwks(signing_key))  # type: ignore[arg-type]
-    authenticator = Authenticator(
-        verifier,
-        # Rate limiting off by default: it has its own tests, and an accidental limit
-        # would make every other test order-dependent.
-        RateLimiter(None, limit_per_minute=0),
-        api_settings(),
-    )
-
-    app.dependency_overrides[get_repository] = lambda: repo
-
-    with TestClient(app, raise_server_exceptions=False) as test_client:
-        # Replace state the lifespan created, so no real pool is used.
-        app.state.repository = repo
-        app.state.redis = None
-        app.state.authenticator = authenticator
-        yield test_client
-
-    app.dependency_overrides.clear()
-
-
-def auth_header(make_token: Any) -> dict[str, str]:
-    return {"Authorization": f"Bearer {make_token()}"}
+    def list_alerts(
+        self, principal: Principal, *, limit: int, unacknowledged_only: bool = True
+    ) -> list[AlertRow]:
+        rows = list(self.alert_rows)
+        if unacknowledged_only:
+            rows = [r for r in rows if r.acknowledged_at is None]
+        rows.sort(key=lambda r: r.triggering_event_ts, reverse=True)
+        return rows[:limit]
 
 
 def make_signing_key() -> rsa.RSAPrivateKey:

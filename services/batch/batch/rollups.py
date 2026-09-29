@@ -64,6 +64,43 @@ class RollupCounts:
     no_data_vehicles: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class UtilisationWindowSummary:
+    """Accounting for one utilisation window: every active vehicle, once.
+
+    Exists so the dashboard can say how many vehicles could not be scored *and why*,
+    rather than implying every vehicle was scored. "Not scored" has two causes with
+    different meanings, and collapsing them answers neither question.
+    """
+
+    tenant_id: str
+    window_end: date
+    window_days: int
+    vehicles_active: int
+    scored: int
+    #: No usable activity reached us. NOT the same as unused - a failed telematics unit
+    #: and a genuinely parked vehicle both send nothing.
+    unscored_no_telemetry: int
+    #: In a class with too few peers for a usable baseline, so skipped rather than
+    #: scored against noise.
+    unscored_class_too_small: int
+    classes_skipped: int
+    formula_version: str = UTILISATION_FORMULA_VERSION
+
+    def __post_init__(self) -> None:
+        total = self.scored + self.unscored_no_telemetry + self.unscored_class_too_small
+        if total != self.vehicles_active:
+            # Raised rather than logged. A wrong total on a finance dashboard is worse
+            # than a failed batch run, because nobody would know to distrust it.
+            raise ValueError(
+                f"utilisation accounting does not add up for {self.tenant_id} "
+                f"{self.window_end}: {self.scored} scored + "
+                f"{self.unscored_no_telemetry} no-telemetry + "
+                f"{self.unscored_class_too_small} class-too-small = {total}, "
+                f"but {self.vehicles_active} vehicles are active"
+            )
+
+
 def _set_role_batch(cur: psycopg.Cursor[TupleRow]) -> None:
     """Switch to the maintenance role.
 
@@ -240,6 +277,10 @@ def load_window_activity(
     Returns activities grouped by vehicle class, plus the number of vehicles excluded
     for having no telemetry at all.
 
+    Driven from ``vehicles`` with a LEFT JOIN, not from ``vehicle_daily``. An inner join
+    would make a vehicle with no rows at all invisible rather than counted as unscored,
+    so the fleet total on the dashboard would quietly shrink to whatever reported.
+
     Grouped by class because utilisation is scored against class peers: judging a heavy
     truck by a city car's norms would be meaningless.
 
@@ -261,20 +302,26 @@ def load_window_activity(
         _set_role_batch(cur)
         cur.execute(
             """
-            SELECT v.class_code, d.vin,
+            SELECT v.class_code, v.vin,
                    count(*) FILTER (WHERE d.was_active),
-                   sum(d.moving_seconds) / 3600.0,
-                   sum(d.distance_km),
-                   sum(d.idle_seconds) / 3600.0,
+                   coalesce(sum(d.moving_seconds), 0) / 3600.0,
+                   coalesce(sum(d.distance_km), 0),
+                   coalesce(sum(d.idle_seconds), 0) / 3600.0,
                    -- Any sign at all that telemetry reached us for this vehicle.
-                   (sum(d.moving_seconds) + sum(d.idle_seconds)
-                      + sum(d.idle_event_count) + sum(d.distance_km)) > 0 AS has_data
-            FROM vehicle_daily d
-            JOIN vehicles v ON v.vin = d.vin
-            WHERE d.tenant_id = %(tenant_id)s
-              AND d.day BETWEEN %(start)s AND %(end)s
+                   -- coalesce, because a vehicle with no rows sums to NULL, and
+                   -- NULL > 0 is NULL - which is not false, and would leave has_data
+                   -- unknown rather than negative.
+                   (coalesce(sum(d.moving_seconds), 0) + coalesce(sum(d.idle_seconds), 0)
+                      + coalesce(sum(d.idle_event_count), 0)
+                      + coalesce(sum(d.distance_km), 0)) > 0 AS has_data
+            FROM vehicles v
+            LEFT JOIN vehicle_daily d
+                   ON d.vin = v.vin
+                  AND d.tenant_id = v.tenant_id
+                  AND d.day BETWEEN %(start)s AND %(end)s
+            WHERE v.tenant_id = %(tenant_id)s
               AND v.is_active
-            GROUP BY v.class_code, d.vin
+            GROUP BY v.class_code, v.vin
             """,
             {"tenant_id": tenant_id, "start": window_start, "end": window_end},
         )
@@ -305,10 +352,10 @@ def compute_utilisation(
     window_end: date,
     window_days: int = DEFAULT_UTILISATION_WINDOW_DAYS,
     config: UtilisationConfig | None = None,
-) -> tuple[int, int, int, int]:
+) -> UtilisationWindowSummary:
     """Score every vehicle's utilisation for one window.
 
-    Returns (scores written, baselines written, classes skipped, vehicles with no data).
+    Returns the window's accounting, which names every active vehicle exactly once.
 
     A class with too few peers is **skipped, not scored with a weak baseline**. A score
     computed against three peers would look identical to one computed against three
@@ -327,6 +374,7 @@ def compute_utilisation(
     scored = 0
     baselines_written = 0
     skipped = 0
+    skipped_vehicles = 0
 
     for class_code, activities in by_class.items():
         if len(activities) < MIN_BASELINE_SAMPLE:
@@ -339,6 +387,9 @@ def compute_utilisation(
                 MIN_BASELINE_SAMPLE,
             )
             skipped += 1
+            # Count the vehicles, not just the class. The dashboard reports vehicles,
+            # and one skipped class of 4 is a very different statement from one of 400.
+            skipped_vehicles += len(activities)
             continue
 
         baseline = build_class_baseline(class_code, activities)
@@ -360,7 +411,62 @@ def compute_utilisation(
             window_end=window_end,
         )
 
-    return scored, baselines_written, skipped, no_data
+    # Every vehicle the query saw, which is every active vehicle in the tenant.
+    active = sum(len(a) for a in by_class.values()) + no_data
+    summary = UtilisationWindowSummary(
+        tenant_id=tenant_id,
+        window_end=window_end,
+        window_days=window_days,
+        vehicles_active=active,
+        scored=scored,
+        unscored_no_telemetry=no_data,
+        unscored_class_too_small=skipped_vehicles,
+        classes_skipped=skipped,
+    )
+    _store_window_summary(conn, summary)
+    return summary
+
+
+def _store_window_summary(
+    conn: psycopg.Connection[TupleRow], summary: UtilisationWindowSummary
+) -> None:
+    """Persist the window accounting, so the API can report it without re-deriving it.
+
+    Upserted on the window key like every other rollup write, which is what makes a
+    re-run correct the numbers rather than duplicate them.
+    """
+    with conn.cursor() as cur:
+        _set_role_batch(cur)
+        cur.execute(
+            """
+            INSERT INTO utilisation_window (
+                tenant_id, window_end, window_days, vehicles_active, scored,
+                unscored_no_telemetry, unscored_class_too_small, classes_skipped,
+                formula_version, computed_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+            ON CONFLICT (tenant_id, window_end) DO UPDATE SET
+                window_days = EXCLUDED.window_days,
+                vehicles_active = EXCLUDED.vehicles_active,
+                scored = EXCLUDED.scored,
+                unscored_no_telemetry = EXCLUDED.unscored_no_telemetry,
+                unscored_class_too_small = EXCLUDED.unscored_class_too_small,
+                classes_skipped = EXCLUDED.classes_skipped,
+                formula_version = EXCLUDED.formula_version,
+                computed_at = now()
+            """,
+            (
+                summary.tenant_id,
+                summary.window_end,
+                summary.window_days,
+                summary.vehicles_active,
+                summary.scored,
+                summary.unscored_no_telemetry,
+                summary.unscored_class_too_small,
+                summary.classes_skipped,
+                summary.formula_version,
+            ),
+        )
+    conn.commit()
 
 
 def _clear_window_scores(

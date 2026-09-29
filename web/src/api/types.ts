@@ -167,11 +167,29 @@ export interface UtilisationEntry {
   formula_version: string;
 }
 
+/**
+ * How much of the fleet the latest window could score.
+ *
+ * The two unscored counts stay apart because they mean different things: chase a silent
+ * telematics unit, or accept that a small class has no usable peer group.
+ */
+export interface UtilisationCoverage {
+  window_end: string;
+  window_days: number;
+  vehicles_active: number;
+  scored: number;
+  /** No usable activity reached us. NOT the same as unused. */
+  unscored_no_telemetry: number;
+  /** In a class with fewer peers than a baseline needs. */
+  unscored_class_too_small: number;
+  formula_version: string;
+}
+
 export interface UtilisationPage {
   items: UtilisationEntry[];
   page: PageMeta;
-  /** Vehicles left unscored because no telemetry reached us. Not the same as unused. */
-  unscored_no_telemetry: number;
+  /** `null` when no window has been scored yet - which is not the same as full coverage. */
+  coverage: UtilisationCoverage | null;
 }
 
 export interface AlertEntry {

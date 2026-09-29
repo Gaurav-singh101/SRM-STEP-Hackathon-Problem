@@ -74,31 +74,39 @@ def run_utilisation(window_days: int, tenant_id: str | None) -> int:
     settings = postgres_settings()
     window_end = datetime.now(UTC).date()
     began = time.perf_counter()
-    total_scores = total_baselines = total_skipped = total_no_data = 0
+    total_scores = total_skipped = total_no_data = 0
+    total_class_too_small = total_active = 0
 
     with psycopg.connect(settings.dsn, row_factory=psycopg.rows.tuple_row) as conn:
         targets = [tenant_id] if tenant_id else _tenants(conn)
         for target in targets:
             assert target is not None
-            scores, baselines, skipped, no_data = compute_utilisation(
+            summary = compute_utilisation(
                 conn, tenant_id=target, window_end=window_end, window_days=window_days
             )
-            total_scores += scores
-            total_baselines += baselines
-            total_skipped += skipped
-            total_no_data += no_data
+            total_scores += summary.scored
+            total_skipped += summary.classes_skipped
+            total_no_data += summary.unscored_no_telemetry
+            total_class_too_small += summary.unscored_class_too_small
+            total_active += summary.vehicles_active
             logger.info(
-                "%s: %d score(s), %d baseline(s), %d class(es) skipped, %d no-data",
+                "%s: %d/%d scored, %d no-data, %d in a class too small, %d class(es) skipped",
                 target,
-                scores,
-                baselines,
-                skipped,
-                no_data,
+                summary.scored,
+                summary.vehicles_active,
+                summary.unscored_no_telemetry,
+                summary.unscored_class_too_small,
+                summary.classes_skipped,
             )
 
     elapsed = time.perf_counter() - began
+    print(f"active vehicles    : {total_active:,}")
     print(f"utilisation scores : {total_scores:,}")
-    print(f"class baselines    : {total_baselines:,}")
+    if total_class_too_small:
+        print(
+            f"class too small    : {total_class_too_small:,} vehicle(s) left unscored "
+            "(fewer peers than a baseline needs)"
+        )
     if total_no_data:
         # Stated, not buried. These vehicles are NOT under-used; no telemetry reached us
         # for them, and reporting them as idle assets would send someone to sell a
