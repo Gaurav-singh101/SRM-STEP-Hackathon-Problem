@@ -24,6 +24,8 @@ from fastapi.responses import JSONResponse
 from api.adapters.repository import FleetRepository
 from api.deps import CORRELATION_HEADER, Authenticator, RateLimiter, RequestContext
 from api.schemas import (
+    AlertEntry,
+    AlertsResponse,
     FleetSummaryResponse,
     HealthResponse,
     IdleEvent,
@@ -34,6 +36,8 @@ from api.schemas import (
     ReadyResponse,
     TrendPoint,
     TrendResponse,
+    UtilisationEntry,
+    UtilisationPage,
     VehicleResponse,
 )
 from fleet_common.auth import TokenVerifier
@@ -41,6 +45,7 @@ from fleet_common.errors import (
     FleetError,
     PaginationCursorError,
     RateLimitedError,
+    ValidationFailedError,
     problem_from,
     unexpected_problem,
 )
@@ -65,6 +70,10 @@ PROBLEM_CONTENT_TYPE: Final[str] = "application/problem+json"
 #: Default reporting window. 30 days matches the utilisation window and a monthly
 #: finance cycle, which is the period a fleet finance manager actually reports on.
 DEFAULT_WINDOW_DAYS: Final[int] = 30
+
+#: Utilisation bands a caller may filter on. An allow-list, so a request can never
+#: shape the query (CLAUDE.md S10).
+VALID_BANDS: Final[frozenset[str]] = frozenset({"low", "normal", "high", "abnormal"})
 
 
 def get_repository(request: Request) -> FleetRepository:
@@ -385,6 +394,94 @@ def create_app() -> FastAPI:
         return LeaderboardResponse(
             items=[LeaderboardEntry.from_row(row, rank) for rank, row in enumerate(rows, 1)],
             since=since,
+        )
+
+    @app.get(
+        "/api/v1/utilisation",
+        response_model=UtilisationPage,
+        tags=["utilisation"],
+        summary="Vehicle utilisation scores, worst first",
+    )
+    def list_utilisation(
+        ctx: Ctx,
+        repo: Repo,
+        cursor: Annotated[
+            str | None, Query(description="Opaque cursor from a previous page")
+        ] = None,
+        page_size: Annotated[int | None, Query(ge=1, le=200)] = None,
+        band: Annotated[
+            str | None,
+            Query(description="Filter by band: low, normal, high, abnormal"),
+        ] = None,
+    ) -> UtilisationPage:
+        size = clamp_page_size(page_size, default=api_settings().api_page_size_default)
+        decoded = Cursor.decode(cursor) if cursor else None
+
+        # Allow-list, not caller input: an arbitrary band string would reach the query
+        # planner, and a typo would silently return nothing rather than an error.
+        bands: tuple[str, ...] = ()
+        if band:
+            requested = tuple(b.strip() for b in band.split(",") if b.strip())
+            invalid = [b for b in requested if b not in VALID_BANDS]
+            if invalid:
+                raise ValidationFailedError(
+                    f"unknown band(s) {invalid}; valid: {sorted(VALID_BANDS)}"
+                )
+            bands = requested
+
+        page = repo.list_utilisation(ctx.principal, page_size=size, cursor=decoded, bands=bands)
+        repo.record_access(
+            ctx.principal,
+            action="read_utilisation",
+            resource_type="fleet",
+            resource_id=None,
+            correlation_id=ctx.correlation_id,
+            client_ip_masked=ctx.client_ip_masked,
+        )
+        return UtilisationPage(
+            items=[UtilisationEntry.from_row(row) for row in page.items],
+            page=PageMeta(
+                next_cursor=page.next_cursor,
+                page_size=size,
+                returned=page.size,
+                has_more=page.has_more,
+            ),
+        )
+
+    @app.get(
+        "/api/v1/alerts",
+        response_model=AlertsResponse,
+        tags=["alerts"],
+        summary="Alerts needing operational attention",
+    )
+    def list_alerts(
+        ctx: Ctx,
+        repo: Repo,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        unacknowledged_only: bool = True,
+    ) -> AlertsResponse:
+        rows = repo.list_alerts(ctx.principal, limit=limit, unacknowledged_only=unacknowledged_only)
+        repo.record_access(
+            ctx.principal,
+            action="read_alerts",
+            resource_type="alert",
+            resource_id=None,
+            correlation_id=ctx.correlation_id,
+            client_ip_masked=ctx.client_ip_masked,
+        )
+        entries = [AlertEntry.from_row(row) for row in rows]
+        return AlertsResponse(
+            items=entries,
+            unacknowledged_only=unacknowledged_only,
+            max_processing_latency_seconds=max(
+                (
+                    e.processing_latency_seconds
+                    for e in entries
+                    if e.processing_latency_seconds is not None
+                ),
+                default=None,
+            ),
+            contains_backfill=any(e.is_backfill for e in entries),
         )
 
     @app.get(

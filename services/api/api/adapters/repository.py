@@ -130,6 +130,81 @@ class VehicleDetail:
     currency: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class UtilisationRow:
+    """One vehicle's utilisation score with the components behind it."""
+
+    vin: str
+    registration: str
+    vehicle_class: str
+    powertrain: str
+    fleet_name: str
+    window_end: date
+    window_days: int
+    score: float
+    band: str
+    active_day_component: float
+    moving_hours_component: float
+    distance_component: float
+    idle_share: float
+    #: Gap between the highest and lowest component; this is what decides ABNORMAL.
+    component_spread: float
+    abnormal_reason: str | None
+    #: Peers the baseline was built from. A score from 5 peers is far weaker than one
+    #: from 500, and the UI says so rather than presenting both identically.
+    baseline_sample_size: int
+    formula_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class AlertRow:
+    """One alert needing attention."""
+
+    alert_id: int
+    vin: str
+    registration: str
+    alert_type: str
+    severity: str
+    triggering_event_ts: datetime
+    ingest_ts: datetime | None
+    persisted_at: datetime
+    idle_event_started_at: datetime | None
+    detail: dict[str, Any]
+    acknowledged_at: datetime | None
+
+    @property
+    def end_to_end_latency_seconds(self) -> float:
+        """From the event happening to the alert being durable - the D10 SLO.
+
+        Meaningful for live streaming only. On replayed history it measures how old the
+        data was rather than how fast the system reacted: backfilling ten days of
+        telemetry produced figures around 83,000 seconds.
+        """
+        return (self.persisted_at - self.triggering_event_ts).total_seconds()
+
+    @property
+    def processing_latency_seconds(self) -> float | None:
+        """From the processor receiving the event to the alert being durable.
+
+        Meaningful whatever the age of the data, which makes it the honest figure to
+        quote for a backfill. ``None`` for alerts written before ingest_ts existed.
+        """
+        if self.ingest_ts is None:
+            return None
+        return (self.persisted_at - self.ingest_ts).total_seconds()
+
+    @property
+    def is_backfill(self) -> bool:
+        """Whether this alert came from replayed history rather than live telemetry.
+
+        Surfaced so a latency figure is never read without the context that decides
+        whether it means anything. A minute is far beyond any live pipeline delay.
+        """
+        if self.ingest_ts is None:
+            return False
+        return (self.ingest_ts - self.triggering_event_ts).total_seconds() > 60
+
+
 class FleetRepository:
     """Read-side data access for the API."""
 
@@ -555,6 +630,169 @@ class FleetRepository:
             total_cost=Decimal(total_cost) if total_cost is not None else None,
             currency=str(currency) if currency else None,
         )
+
+    # ------------------------------------------------------------ utilisation
+
+    def list_utilisation(
+        self,
+        principal: Principal,
+        *,
+        page_size: int,
+        cursor: Cursor | None = None,
+        bands: tuple[str, ...] = (),
+    ) -> Page[UtilisationRow]:
+        """Utilisation scores for the most recent window, worst first.
+
+        Ordered ascending by score, because the point of the view is the vehicles at the
+        bottom: they belong on the first page, not the last.
+        """
+        conditions = [
+            "u.tenant_id = %(tenant_id)s",
+            # Newest window only. Older rows are kept for history, but showing several
+            # windows together would mix scores computed over different data.
+            "u.window_end = (SELECT max(window_end) FROM vehicle_utilisation"
+            "                 WHERE tenant_id = %(tenant_id)s)",
+        ]
+        params: dict[str, Any] = {"tenant_id": principal.tenant_id}
+
+        if bands:
+            # Bound to an allow-listed set by the router, never raw caller input.
+            conditions.append("u.band = ANY(%(bands)s)")
+            params["bands"] = list(bands)
+        if cursor is not None:
+            # Score ascending, VIN breaking ties: a total order, so a cursor cannot
+            # land ambiguously between two vehicles with the same score.
+            conditions.append("(u.score, u.vin) > (%(cursor_score)s, %(cursor_vin)s)")
+            params["cursor_score"] = float(cursor.sort_value)
+            params["cursor_vin"] = cursor.tie_break
+
+        params["limit"] = page_size + 1
+
+        with self._scoped(principal) as cur:
+            cur.execute(
+                f"""
+                SELECT u.vin, v.registration, v.class_code, v.powertrain_code, f.name,
+                       u.window_end, u.window_days, u.score, u.band,
+                       u.active_day_component, u.moving_hours_component,
+                       u.distance_component, u.idle_share, u.component_spread,
+                       u.abnormal_reason, u.baseline_sample_size, u.formula_version
+                FROM vehicle_utilisation u
+                JOIN vehicles v ON v.vin = u.vin
+                JOIN fleets f ON f.fleet_id = v.fleet_id
+                WHERE {" AND ".join(conditions)}
+                ORDER BY u.score ASC, u.vin ASC
+                LIMIT %(limit)s
+                """,  # noqa: S608 - conditions are an allow-list, values are bound
+                params,
+            )
+            rows = [self._to_utilisation(r) for r in cur.fetchall()]
+
+        return build_page(
+            rows,
+            page_size=page_size,
+            cursor_of=lambda row: Cursor.with_tie_break(str(row.score), row.vin),
+        )
+
+    @staticmethod
+    def _to_utilisation(row: Row) -> UtilisationRow:
+        (
+            vin,
+            registration,
+            vehicle_class,
+            powertrain,
+            fleet_name,
+            window_end,
+            window_days,
+            score,
+            band,
+            active_c,
+            moving_c,
+            distance_c,
+            idle_share,
+            component_spread,
+            abnormal_reason,
+            baseline_sample_size,
+            formula_version,
+        ) = row
+        return UtilisationRow(
+            vin=str(vin).strip(),
+            registration=str(registration),
+            vehicle_class=str(vehicle_class),
+            powertrain=str(powertrain),
+            fleet_name=str(fleet_name),
+            window_end=window_end,
+            window_days=int(window_days),
+            score=float(score),
+            band=str(band),
+            active_day_component=float(active_c),
+            moving_hours_component=float(moving_c),
+            distance_component=float(distance_c),
+            idle_share=float(idle_share),
+            component_spread=float(component_spread),
+            abnormal_reason=str(abnormal_reason) if abnormal_reason else None,
+            baseline_sample_size=int(baseline_sample_size),
+            formula_version=str(formula_version),
+        )
+
+    # ----------------------------------------------------------------- alerts
+
+    def list_alerts(
+        self,
+        principal: Principal,
+        *,
+        limit: int,
+        unacknowledged_only: bool = True,
+    ) -> list[AlertRow]:
+        """Alerts needing attention, newest first."""
+        conditions = ["a.tenant_id = %(tenant_id)s"]
+        params: dict[str, Any] = {"tenant_id": principal.tenant_id, "limit": limit}
+        if unacknowledged_only:
+            conditions.append("a.acknowledged_at IS NULL")
+
+        with self._scoped(principal) as cur:
+            cur.execute(
+                f"""
+                SELECT a.alert_id, a.vin, v.registration, a.alert_type, a.severity,
+                       a.triggering_event_ts, a.ingest_ts, a.persisted_at,
+                       a.idle_event_started_at, a.detail, a.acknowledged_at
+                FROM alerts a
+                JOIN vehicles v ON v.vin = a.vin
+                WHERE {" AND ".join(conditions)}
+                ORDER BY a.triggering_event_ts DESC
+                LIMIT %(limit)s
+                """,  # noqa: S608 - conditions are an allow-list, values are bound
+                params,
+            )
+            rows = cur.fetchall()
+
+        return [
+            AlertRow(
+                alert_id=int(alert_id),
+                vin=str(vin).strip(),
+                registration=str(registration),
+                alert_type=str(alert_type),
+                severity=str(severity),
+                triggering_event_ts=triggering_ts,
+                ingest_ts=ingest_ts,
+                persisted_at=persisted_at,
+                idle_event_started_at=segment_start,
+                detail=dict(detail) if detail else {},
+                acknowledged_at=acknowledged_at,
+            )
+            for (
+                alert_id,
+                vin,
+                registration,
+                alert_type,
+                severity,
+                triggering_ts,
+                ingest_ts,
+                persisted_at,
+                segment_start,
+                detail,
+                acknowledged_at,
+            ) in rows
+        ]
 
     def daily_idle_trend(
         self, principal: Principal, *, since: date, until: date

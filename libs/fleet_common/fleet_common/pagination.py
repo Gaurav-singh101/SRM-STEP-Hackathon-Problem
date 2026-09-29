@@ -61,12 +61,23 @@ class Cursor:
 
     #: Value of the primary sort column on the last row of the previous page.
     sort_value: str
-    #: Tie-breaker: the row's primary key.
+    #: Tie-breaker: the row's primary key, for tables keyed by an integer.
     row_id: int
+    #: Tie-breaker for tables keyed by a string, such as utilisation scores keyed by
+    #: VIN. Exactly one of the two is meaningful for a given query; both exist because
+    #: a single sort column is never unique and the tie-break must match the key type.
+    tie_break: str = ""
 
     def encode(self) -> str:
         """Serialise to an opaque, URL-safe token."""
-        body = orjson.dumps({"v": CURSOR_VERSION, "s": self.sort_value, "i": self.row_id})
+        body = orjson.dumps(
+            {
+                "v": CURSOR_VERSION,
+                "s": self.sort_value,
+                "i": self.row_id,
+                "t": self.tie_break,
+            }
+        )
         return base64.urlsafe_b64encode(body).decode("ascii").rstrip("=")
 
     @classmethod
@@ -95,7 +106,10 @@ class Cursor:
         row_id = body.get("i")
         if not isinstance(sort_value, str) or not isinstance(row_id, int):
             raise InvalidCursorError("cursor is missing its sort key or row id")
-        return cls(sort_value=sort_value, row_id=row_id)
+        tie_break = body.get("t", "")
+        if not isinstance(tie_break, str):
+            raise InvalidCursorError("cursor tie-break is not a string")
+        return cls(sort_value=sort_value, row_id=row_id, tie_break=tie_break)
 
     @classmethod
     def from_row(cls, sort_value: datetime | str | int, row_id: int) -> Cursor:
@@ -104,6 +118,11 @@ class Cursor:
         # microseconds and the cursor would drift onto a neighbouring row.
         encoded = sort_value.isoformat() if isinstance(sort_value, datetime) else str(sort_value)
         return cls(sort_value=encoded, row_id=row_id)
+
+    @classmethod
+    def with_tie_break(cls, sort_value: str, tie_break: str) -> Cursor:
+        """Build a cursor whose tie-breaker is a string key rather than an integer."""
+        return cls(sort_value=sort_value, row_id=0, tie_break=tie_break)
 
     @property
     def sort_datetime(self) -> datetime:

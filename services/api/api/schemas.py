@@ -14,14 +14,16 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, Self
+from typing import Annotated, Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from api.adapters.repository import (
+    AlertRow,
     FleetSummary,
     IdleEventRow,
     LeaderboardRow,
+    UtilisationRow,
     VehicleDetail,
 )
 
@@ -313,3 +315,123 @@ class ReadyResponse(_Base):
     postgres: bool
     redis: bool
     degraded: bool
+
+
+class UtilisationEntry(_Base):
+    """One vehicle's utilisation score.
+
+    The three components are returned alongside the score, not instead of it. A single
+    opaque number does not survive a fleet manager asking "why is this 31?", and the
+    components are what make the answer checkable.
+    """
+
+    vin: str
+    registration: str
+    vehicle_class: str
+    powertrain: str
+    fleet_name: str
+    score: float
+    band: str
+    active_day_component: float
+    moving_hours_component: float
+    distance_component: float
+    idle_share: float
+    #: Gap between the highest and lowest component. Decides the `abnormal` band by
+    #: measuring the vehicle against itself rather than against its peers.
+    component_spread: float
+    #: Plain-language explanation, present only for `abnormal`.
+    abnormal_reason: str | None
+    window_days: int
+    #: Peers the baseline was built from. A score computed against 5 vehicles is far
+    #: weaker than one computed against 500, so the UI can qualify it.
+    baseline_sample_size: int
+    formula_version: str
+
+    @classmethod
+    def from_row(cls, row: UtilisationRow) -> Self:
+        return cls(
+            vin=row.vin,
+            registration=row.registration,
+            vehicle_class=row.vehicle_class,
+            powertrain=row.powertrain,
+            fleet_name=row.fleet_name,
+            score=round(row.score, 1),
+            band=row.band,
+            active_day_component=round(row.active_day_component, 3),
+            moving_hours_component=round(row.moving_hours_component, 3),
+            distance_component=round(row.distance_component, 3),
+            idle_share=round(row.idle_share, 3),
+            component_spread=round(row.component_spread, 3),
+            abnormal_reason=row.abnormal_reason,
+            window_days=row.window_days,
+            baseline_sample_size=row.baseline_sample_size,
+            formula_version=row.formula_version,
+        )
+
+
+class UtilisationPage(_Base):
+    items: list[UtilisationEntry]
+    page: PageMeta
+    #: Vehicles with no telemetry are NOT scored. They are not under-used; we have no
+    #: data, and reporting them as idle assets would send someone to sell a working
+    #: vehicle. Surfaced so the UI can explain the gap rather than show a silent
+    #: shortfall against the fleet size.
+    unscored_no_telemetry: int = 0
+
+
+class AlertEntry(_Base):
+    """One alert needing attention."""
+
+    alert_id: int
+    vin: str
+    registration: str
+    alert_type: str
+    severity: str
+    triggering_event_ts: datetime
+    persisted_at: datetime
+    #: The D10 SLO: from the event happening to the alert being durable. Meaningful for
+    #: live streaming only - on replayed history it measures the age of the data.
+    end_to_end_latency_seconds: float
+    #: From the processor receiving the event to the alert being durable. Meaningful
+    #: whatever the age of the data, so this is the figure to quote for a backfill.
+    processing_latency_seconds: float | None
+    #: True when this alert came from replayed history. Returned so a latency figure is
+    #: never read without the context that decides whether it means anything.
+    is_backfill: bool
+    idle_event_started_at: datetime | None
+    detail: dict[str, Any]
+    acknowledged: bool
+
+    @classmethod
+    def from_row(cls, row: AlertRow) -> Self:
+        return cls(
+            alert_id=row.alert_id,
+            vin=row.vin,
+            registration=row.registration,
+            alert_type=row.alert_type,
+            severity=row.severity,
+            triggering_event_ts=row.triggering_event_ts,
+            persisted_at=row.persisted_at,
+            end_to_end_latency_seconds=round(row.end_to_end_latency_seconds, 3),
+            processing_latency_seconds=(
+                round(row.processing_latency_seconds, 3)
+                if row.processing_latency_seconds is not None
+                else None
+            ),
+            is_backfill=row.is_backfill,
+            idle_event_started_at=row.idle_event_started_at,
+            detail=row.detail,
+            acknowledged=row.acknowledged_at is not None,
+        )
+
+
+class AlertsResponse(_Base):
+    items: list[AlertEntry]
+    unacknowledged_only: bool
+    #: Worst PROCESSING latency in this page, against the D10 target of under 5s. The
+    #: processing figure is used rather than end-to-end because it means the same thing
+    #: for live and replayed data.
+    max_processing_latency_seconds: float | None
+    #: True when any alert here came from replayed history, so the UI can say plainly
+    #: that end-to-end latency reflects data age rather than system speed.
+    contains_backfill: bool = False

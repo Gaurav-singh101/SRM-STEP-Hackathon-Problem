@@ -88,9 +88,17 @@ class Alert:
     alert_type: AlertType
     tenant_id: str
     vin: str
-    #: The event whose arrival caused the alert. Latency is measured from here to
-    #: the moment the row is persisted, because "when it appeared" is ambiguous.
+    #: The event whose arrival caused the alert.
     triggering_event_ts: datetime
+    #: When the processor received that event. Assigned here, never taken from the
+    #: device, because a device clock is bug- and attacker-controlled.
+    #:
+    #: Two latencies are derivable and they answer different questions:
+    #:   end-to-end = persisted_at - triggering_event_ts  (the D10 SLO, live streaming)
+    #:   processing = persisted_at - ingest_ts            (meaningful on replay too)
+    #: Backfilling ten days of history produced end-to-end figures of 23 hours, which
+    #: is the age of the data rather than any property of the system.
+    ingest_ts: datetime
     severity: str
     detail: dict[str, str | float | int]
     #: Ties the alert to the idle segment, which is also the suppression key: one
@@ -246,7 +254,7 @@ class BatchProcessor:
                 continue
 
             result.accepted.append(verdict)
-            self._advance_idle(verdict, vehicles, result)
+            self._advance_idle(verdict, vehicles, result, now=now)
 
         return result
 
@@ -255,6 +263,8 @@ class BatchProcessor:
         event: TelemetryEvent,
         vehicles: dict[str, VehicleRef],
         result: BatchResult,
+        *,
+        now: datetime,
     ) -> None:
         """Feed one accepted event to its vehicle's idle state machine."""
         machine = self._machines.get(event.vin)
@@ -296,7 +306,7 @@ class BatchProcessor:
                     )
                 )
             if observation.became_excessive and len(result.alerts) < MAX_ALERTS_PER_BATCH:
-                result.alerts.append(self._excessive_alert(event, vehicle, machine))
+                result.alerts.append(self._excessive_alert(event, vehicle, machine, now=now))
 
         result.latest_state[event.vin] = LatestState(
             vin=event.vin,
@@ -349,13 +359,19 @@ class BatchProcessor:
         return PricedIdleSegment(segment=segment, vehicle=vehicle, estimate=estimate)
 
     def _excessive_alert(
-        self, event: TelemetryEvent, vehicle: VehicleRef, machine: IdleStateMachine
+        self,
+        event: TelemetryEvent,
+        vehicle: VehicleRef,
+        machine: IdleStateMachine,
+        *,
+        now: datetime,
     ) -> Alert:
         return Alert(
             alert_type=AlertType.EXCESSIVE_IDLE_IN_PROGRESS,
             tenant_id=vehicle.tenant_id,
             vin=vehicle.vin,
             triggering_event_ts=event.ts,
+            ingest_ts=now,
             severity="warning",
             detail={
                 "idle_seconds": round(machine.open_duration_seconds, 1),

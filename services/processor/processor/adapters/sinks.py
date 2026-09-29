@@ -264,8 +264,9 @@ class PostgresSink:
                         """
                         INSERT INTO alerts (
                             tenant_id, vin, alert_type, severity,
-                            triggering_event_ts, idle_event_started_at, detail
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            triggering_event_ts, ingest_ts, idle_event_started_at,
+                            detail
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         -- The suppression index is PARTIAL, so the conflict target
                         -- must repeat its predicate for Postgres to infer it.
                         ON CONFLICT (vin, alert_type, idle_event_started_at)
@@ -279,6 +280,7 @@ class PostgresSink:
                                 a.alert_type.value,
                                 a.severity,
                                 a.triggering_event_ts,
+                                a.ingest_ts,
                                 a.idle_segment_started_at,
                                 orjson.dumps(a.detail).decode(),
                             )
