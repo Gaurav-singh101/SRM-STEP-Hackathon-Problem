@@ -29,6 +29,12 @@ from fleet_common.vin import repair_check_digit
 VIN_ALPHABET: Final[str] = "ABCDEFGHJKLMNPRSTUVWXYZ0123456789"
 VIN_BASE: Final[int] = len(VIN_ALPHABET)
 
+#: Demo tenants. Defined here, beside the roster, and imported by the seed job so
+#: the two cannot disagree: an event claiming one tenant while the vehicle master says
+#: another would split a fleet's cost across two tenants. Two tenants, not one, so
+#: tenant isolation is demonstrable rather than merely implemented.
+DEMO_TENANT_IDS: Final[tuple[str, ...]] = ("tenant-demo", "tenant-second")
+
 #: Synthetic World Manufacturer Identifiers. Deliberately not real WMIs: PDF S14
 #: forbids real vehicle data, and a real WMI would imply a real manufacturer.
 SYNTHETIC_WMIS: Final[tuple[str, ...]] = ("ZZA", "ZZB", "ZZC", "ZZD")
@@ -184,7 +190,7 @@ def build_fleet(
     *,
     vehicle_count: int,
     seed: int,
-    tenant_ids: tuple[str, ...] = ("tenant-demo",),
+    tenant_ids: tuple[str, ...] = DEMO_TENANT_IDS,
     fleets_per_tenant: int = 4,
     depot_count: int = 12,
 ) -> list[SyntheticVehicle]:

@@ -5,6 +5,10 @@ description = "Historical rollups, late-event reconciliation, retention jobs (AD
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fleet-common",
+    # The seed job writes the SAME roster the simulator emits telemetry for. Sharing
+    # the generator rather than reimplementing it is the point: a VIN missing from the
+    # vehicles table has no powertrain, and a vehicle with no powertrain has no cost.
+    "fleet-simulator",
     "psycopg[binary,pool]>=3.2",
     "pymongo>=4.10",
 ]
@@ -18,3 +22,4 @@ packages = ["batch"]
 
 [tool.uv.sources]
 fleet-common = { workspace = true }
+fleet-simulator = { workspace = true }

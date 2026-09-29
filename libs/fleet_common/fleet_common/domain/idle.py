@@ -172,6 +172,15 @@ class IdleStateMachine:
         """Duration of the in-progress segment, 0.0 when none is open."""
         return self._open.duration_seconds if self._open is not None else 0.0
 
+    @property
+    def open_started_at(self) -> datetime | None:
+        """Start of the in-progress segment, or ``None`` when none is open.
+
+        Exposed so an alert can be keyed on segment identity rather than on the
+        timestamp of whichever event happened to trigger it (D10 suppression).
+        """
+        return self._open.started_at if self._open is not None else None
+
     def _is_idling(self, event: TelemetryEvent) -> bool:
         """Apply hysteresis: the bound depends on whether we are already idle."""
         if not event.engine_powered:

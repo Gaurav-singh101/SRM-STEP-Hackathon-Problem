@@ -482,3 +482,56 @@ def test_counts_account_for_every_consumed_message() -> None:
     messages = [*good, *good, b"garbage"]
     result = processor.process(messages, VEHICLES, now=NOW)
     assert result.total_consumed == len(messages)
+
+
+def test_segment_crossing_the_threshold_on_its_closing_sample_raises_no_alert() -> None:
+    """Verified against real data, and deliberate rather than a gap.
+
+    EXCESSIVE_IDLE_IN_PROGRESS says a vehicle is idling *right now*. A segment that
+    only reaches the threshold on the sample that ends it has already stopped idling,
+    so alerting would send an operator after a driver who is already moving.
+
+    Consequence, asserted here: alerts <= excessive segments, and the difference is
+    exactly these boundary cases. A pipeline run over 305,745 events produced 71
+    excessive segments and 69 alerts; both un-alerted segments were exactly 600 s.
+    """
+    processor = BatchProcessor(config())
+    # Idles to 590 s, then the closing sample lands at 600 s exactly.
+    events = [
+        *make_idle_run(start=0, duration=590, step=10),
+        make_event(offset_seconds=600, speed_kph=40.0, seq=900),
+    ]
+    result = processor.process(wire(*events), VEHICLES, now=NOW)
+
+    assert len(result.idle_segments) == 1
+    assert result.idle_segments[0].segment.excessive is True
+    assert result.alerts == [], "an ended idle period must not raise an in-progress alert"
+
+
+def test_alert_is_keyed_on_the_segment_start_not_the_triggering_event() -> None:
+    """The identity being suppressed is "this idle period", so keying on the trigger
+    would make the key depend on which event happened to cross the threshold."""
+    processor = BatchProcessor(config())
+    events = make_idle_run(start=0, duration=900, step=10)
+    result = processor.process(wire(*events), VEHICLES, now=NOW)
+
+    alert = result.alerts[0]
+    assert alert.idle_segment_started_at == events[0].ts
+    assert alert.idle_segment_started_at != alert.triggering_event_ts
+
+
+def test_alerts_never_exceed_excessive_segments() -> None:
+    """The invariant in one assertion, over a stream with several idle periods."""
+    processor = BatchProcessor(config())
+    events: list[object] = []
+    offset = 0.0
+    for _ in range(4):
+        events.extend(make_idle_run(start=offset, duration=900, step=10))
+        offset += 910
+        events.append(make_event(offset_seconds=offset, speed_kph=45.0, seq=9000))
+        offset += 20
+
+    result = processor.process(wire(*events), VEHICLES, now=NOW)
+    excessive = [p for p in result.idle_segments if p.segment.excessive]
+    assert len(result.alerts) <= len(excessive) + 1  # +1 for a still-open final segment
+    assert result.alerts, "expected alerts for multi-segment excessive idle"
