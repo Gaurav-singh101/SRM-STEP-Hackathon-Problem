@@ -28,6 +28,8 @@ from pymongo import MongoClient, UpdateOne
 from pymongo.errors import BulkWriteError
 from redis import Redis
 
+from fleet_common.domain.geohash import geohash
+from fleet_common.domain.trips import Trip
 from fleet_common.events import Powertrain, TelemetryEvent
 from fleet_common.settings import (
     MongoSettings,
@@ -194,6 +196,53 @@ class PostgresSink:
             estimate.idle_threshold_seconds if estimate else 0,
             estimate.litres_measured if estimate else None,
         )
+
+    def write_trips(self, trips: Sequence[Trip]) -> int:
+        """Insert completed trips, skipping any already present.
+
+        Idempotent on ``(vin, started_at)`` like idle events, so a replayed batch after
+        a commit failure cannot double-count distance.
+        """
+        if not trips:
+            return 0
+
+        by_tenant: dict[str, list[Trip]] = {}
+        for trip in trips:
+            by_tenant.setdefault(trip.tenant_id, []).append(trip)
+
+        written = 0
+        with self._pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET ROLE fleet_app")
+            for tenant_id, group in by_tenant.items():
+                with conn.cursor() as cur:
+                    _set_tenant(cur, tenant_id)
+                    cur.executemany(
+                        """
+                        INSERT INTO trips (
+                            tenant_id, vin, started_at, ended_at, distance_km,
+                            moving_seconds, idle_seconds, start_geohash, end_geohash
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT DO NOTHING
+                        """,
+                        [
+                            (
+                                t.tenant_id,
+                                t.vin,
+                                t.started_at,
+                                t.ended_at,
+                                t.distance_km,
+                                t.moving_seconds,
+                                t.idle_seconds,
+                                geohash(t.start_lat, t.start_lon),
+                                geohash(t.end_lat, t.end_lon),
+                            )
+                            for t in group
+                        ],
+                    )
+                    written += cur.rowcount if cur.rowcount > 0 else 0
+            conn.commit()
+        return written
 
     def write_alerts(self, alerts: Sequence[Alert]) -> int:
         """Insert alerts, suppressing repeats for the same idle segment (D10)."""

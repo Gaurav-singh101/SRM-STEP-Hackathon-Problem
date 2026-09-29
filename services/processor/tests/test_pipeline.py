@@ -17,6 +17,7 @@ import pytest
 
 from fleet_common.domain.fuel import FuelPrice, VehicleClass
 from fleet_common.domain.idle import IdleConfig
+from fleet_common.domain.trips import TripConfig
 from fleet_common.events import Ignition, Powertrain
 from fleet_common.testing import TEST_TENANT, TEST_VIN, make_event, make_idle_run
 from processor.dedup import DedupConfig
@@ -53,6 +54,7 @@ VEHICLES = {TEST_VIN: DIESEL_TRUCK}
 
 def config(**overrides: object) -> PipelineConfig:
     base = {
+        "trip": TripConfig(),
         "idle": IdleConfig(
             min_seconds=180,
             entry_speed_kph=2.0,
@@ -535,3 +537,103 @@ def test_alerts_never_exceed_excessive_segments() -> None:
     excessive = [p for p in result.idle_segments if p.segment.excessive]
     assert len(result.alerts) <= len(excessive) + 1  # +1 for a still-open final segment
     assert result.alerts, "expected alerts for multi-segment excessive idle"
+
+
+# --------------------------------------------------------------------------
+# Trip segmentation through the pipeline
+# --------------------------------------------------------------------------
+
+
+def moving_run(
+    *,
+    start: float,
+    duration: float,
+    speed_kph: float,
+    odometer_start: float,
+    step: float = 10.0,
+    seq_start: int = 0,
+) -> list[object]:
+    """A run of moving samples with a plausibly advancing odometer."""
+    count = int(duration // step) + 1
+    events: list[object] = []
+    odometer = odometer_start
+    for i in range(count):
+        events.append(
+            make_event(
+                offset_seconds=start + i * step,
+                speed_kph=speed_kph,
+                odometer_km=round(odometer, 3),
+                seq=seq_start + i,
+            )
+        )
+        odometer += speed_kph * step / 3600.0
+    return events
+
+
+def test_a_journey_produces_a_trip() -> None:
+    """Utilisation is derived from trips (D3), so the pipeline must produce them."""
+    processor = BatchProcessor(config())
+    events = [
+        *moving_run(start=0, duration=1800, speed_kph=60.0, odometer_start=1000.0),
+        *make_idle_run(start=1810, duration=600, step=10, seq_start=1000, odometer_km=1030.0),
+    ]
+    result = processor.process(wire(*events), VEHICLES, now=NOW)
+
+    assert len(result.trips) == 1
+    trip = result.trips[0]
+    assert trip.vin == TEST_VIN
+    assert trip.tenant_id == TEST_TENANT
+    assert trip.distance_km > 25.0
+
+
+def test_trips_and_idle_segments_are_produced_from_the_same_stream() -> None:
+    """They answer different questions and are detected independently, so a stream
+    with both must yield both."""
+    processor = BatchProcessor(config())
+    events = [
+        *moving_run(start=0, duration=1800, speed_kph=60.0, odometer_start=1000.0),
+        *make_idle_run(start=1810, duration=900, step=10, seq_start=1000, odometer_km=1030.0),
+        *moving_run(
+            start=2720, duration=1800, speed_kph=60.0, odometer_start=1030.0, seq_start=5000
+        ),
+    ]
+    result = processor.process(wire(*events), VEHICLES, now=NOW)
+    assert result.trips, "no trips detected"
+    assert result.idle_segments, "no idle segments detected"
+
+
+def test_an_open_trip_is_flushed_at_shutdown() -> None:
+    """A journey in progress when the consumer stops would otherwise be lost, and the
+    vehicle would look less used than it was."""
+    processor = BatchProcessor(config())
+    processor.process(
+        wire(*moving_run(start=0, duration=1800, speed_kph=60.0, odometer_start=1000.0)),
+        VEHICLES,
+        now=NOW,
+    )
+    flushed = processor.flush_open_trips(VEHICLES)
+    assert len(flushed) == 1
+    assert processor.flush_open_trips(VEHICLES) == [], "flush must be idempotent"
+
+
+def test_dropping_a_vehicle_releases_its_trip_state() -> None:
+    processor = BatchProcessor(config())
+    processor.process(
+        wire(*moving_run(start=0, duration=600, speed_kph=60.0, odometer_start=1000.0)),
+        VEHICLES,
+        now=NOW,
+    )
+    processor.drop_vehicles([TEST_VIN])
+    assert processor.flush_open_trips(VEHICLES) == []
+
+
+def test_a_trip_for_an_unknown_vehicle_is_not_emitted() -> None:
+    """Without the vehicle master there is no tenant to attribute the trip to, and a
+    trip with no tenant could not be written under row-level security anyway."""
+    processor = BatchProcessor(config())
+    result = processor.process(
+        wire(*moving_run(start=0, duration=1800, speed_kph=60.0, odometer_start=1000.0)),
+        {},
+        now=NOW,
+    )
+    assert result.trips == []

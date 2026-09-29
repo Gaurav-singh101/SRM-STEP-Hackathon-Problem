@@ -79,19 +79,26 @@ def make_idle_run(
     speed_kph: float = 0.0,
     fuel_rate_lph: float | None = None,
     vin: str = TEST_VIN,
+    seq_start: int = 0,
+    odometer_km: float = 1000.0,
 ) -> list[TelemetryEvent]:
     """A contiguous run of stationary, engine-on samples every ``step`` seconds.
 
     Inclusive of both endpoints, so ``duration`` is the observed span.
+
+    ``seq_start`` exists so runs can be composed into one stream. Sequence numbers are
+    monotonic per vehicle, and dedup relies on that: a second run restarting at 0 would
+    be classified as replayed data and never reach the state machines at all.
     """
     count = int(duration // step) + 1
     return [
         make_event(
             offset_seconds=start + i * step,
             speed_kph=speed_kph,
-            seq=i,
+            seq=seq_start + i,
             fuel_rate_lph=fuel_rate_lph,
             vin=vin,
+            odometer_km=odometer_km,
         )
         for i in range(count)
     ]

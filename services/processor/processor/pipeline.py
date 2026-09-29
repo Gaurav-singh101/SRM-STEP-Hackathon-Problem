@@ -34,6 +34,8 @@ from fleet_common.domain.idle import (
     IdleStateMachine,
     with_identity,
 )
+from fleet_common.domain.trips import Trip, TripConfig, TripStateMachine
+from fleet_common.domain.trips import with_identity as trip_with_identity
 from fleet_common.events import Powertrain, TelemetryEvent
 from processor.dedup import (
     DedupConfig,
@@ -143,6 +145,9 @@ class BatchResult:
     rejections: list[Rejection] = field(default_factory=list)
     late: list[TelemetryEvent] = field(default_factory=list)
     idle_segments: list[PricedIdleSegment] = field(default_factory=list)
+    # Completed journeys. Utilisation needs moving time and distance (D3), and the PDF
+    # S8 relational core lists Trip as a first-class entity.
+    trips: list[Trip] = field(default_factory=list)
     alerts: list[Alert] = field(default_factory=list)
     latest_state: dict[str, LatestState] = field(default_factory=dict)
     duplicates: int = 0
@@ -166,6 +171,7 @@ class PipelineConfig:
     """All business parameters, injected (CLAUDE.md S7)."""
 
     idle: IdleConfig
+    trip: TripConfig
     dedup: DedupConfig
     validation: ValidationConfig
     #: Fuel price per fuel type, resolved by the adapter from the temporal price
@@ -181,12 +187,17 @@ class BatchProcessor:
     rebuilt per batch would cut every segment at the batch boundary.
     """
 
-    __slots__ = ("_config", "_dedup", "_machines")
+    __slots__ = ("_config", "_dedup", "_machines", "_trip_machines")
 
     def __init__(self, config: PipelineConfig) -> None:
         self._config = config
         self._dedup = DedupState()
         self._machines: dict[str, IdleStateMachine] = {}
+        # A separate machine per vehicle, not a combined one: idle and trip detection
+        # answer different questions and tolerate different errors. Idle may under-claim
+        # because an over-stated cost is worse than an under-stated one; trips may not,
+        # because a missed trip makes a working vehicle look like an asset to sell.
+        self._trip_machines: dict[str, TripStateMachine] = {}
 
     @property
     def dedup_state(self) -> DedupState:
@@ -252,7 +263,23 @@ class BatchProcessor:
             self._machines[event.vin] = machine
 
         observation = machine.observe(event)
+
+        trip_machine = self._trip_machines.get(event.vin)
+        if trip_machine is None:
+            trip_machine = TripStateMachine(self._config.trip)
+            self._trip_machines[event.vin] = trip_machine
+        trip_observation = trip_machine.observe(event)
+
         vehicle = vehicles.get(event.vin)
+
+        if vehicle is not None and trip_observation.closed_trip is not None:
+            result.trips.append(
+                trip_with_identity(
+                    trip_observation.closed_trip,
+                    tenant_id=vehicle.tenant_id,
+                    vin=vehicle.vin,
+                )
+            )
 
         if vehicle is None:
             result.unknown_vehicle += 1
@@ -342,6 +369,21 @@ class BatchProcessor:
             idle_segment_started_at=machine.open_started_at or event.ts,
         )
 
+    def flush_open_trips(self, vehicles: dict[str, VehicleRef]) -> list[Trip]:
+        """Close every open trip, e.g. at shutdown or partition revocation.
+
+        Without this, a journey in progress when the consumer stops is lost, and the
+        vehicle looks less used than it was.
+        """
+        closed: list[Trip] = []
+        for vin, machine in self._trip_machines.items():
+            trip = machine.flush()
+            vehicle = vehicles.get(vin)
+            if trip is None or vehicle is None:
+                continue
+            closed.append(trip_with_identity(trip, tenant_id=vehicle.tenant_id, vin=vin))
+        return closed
+
     def flush_open_segments(self, vehicles: dict[str, VehicleRef]) -> list[PricedIdleSegment]:
         """Close every open segment, e.g. at shutdown or partition revocation.
 
@@ -374,6 +416,7 @@ class BatchProcessor:
         """
         for vin in vins:
             self._machines.pop(vin, None)
+            self._trip_machines.pop(vin, None)
             self._dedup.watermarks.pop(vin, None)
 
     @property

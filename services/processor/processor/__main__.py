@@ -30,6 +30,7 @@ import psycopg.rows
 
 from fleet_common.domain.fuel import FuelPrice
 from fleet_common.domain.idle import IdleConfig
+from fleet_common.domain.trips import TripConfig
 from fleet_common.settings import (
     app_settings,
     cost_settings,
@@ -70,6 +71,7 @@ class RunTotals:
     late: int = 0
     rejected: int = 0
     idle_events: int = 0
+    trips: int = 0
     alerts: int = 0
     unknown_vehicle: int = 0
     consume_errors: int = 0
@@ -146,6 +148,7 @@ def build_pipeline_config(prices: dict[str, FuelPrice]) -> PipelineConfig:
     idle = idle_settings()
     stream = stream_settings()
     return PipelineConfig(
+        trip=TripConfig(),
         idle=IdleConfig(
             min_seconds=idle.idle_min_seconds,
             entry_speed_kph=idle.idle_entry_speed_kph,
@@ -207,6 +210,9 @@ def run(argv: list[str] | None = None) -> int:
         closed = processor.flush_open_segments(vehicle_cache)
         if closed:
             postgres.write_idle_events(closed)
+        open_trips = processor.flush_open_trips(vehicle_cache)
+        if open_trips:
+            postgres.write_trips(open_trips)
         redis_state.save_watermarks(processor.dedup_state.watermarks)
 
     consumer = TelemetryConsumer(kafka, on_revoke=on_revoke)
@@ -274,6 +280,11 @@ def run(argv: list[str] | None = None) -> int:
             written = postgres.write_idle_events(closed)
             totals.idle_events += written
             logger.info("flushed %d open idle segment(s)", written)
+        open_trips = processor.flush_open_trips(vehicle_cache)
+        if open_trips:
+            written_trips = postgres.write_trips(open_trips)
+            totals.trips += written_trips
+            logger.info("flushed %d open trip(s)", written_trips)
         redis_state.save_watermarks(processor.dedup_state.watermarks)
         side.flush()
         consumer.close()
@@ -319,6 +330,11 @@ def _process_and_persist(
     # Raw telemetry first: it is the source everything else can be rebuilt from, so if
     # any single write is going to succeed it should be this one.
     counts.raw_events = mongo.write_events(result.accepted)
+
+    if result.trips:
+        # Trips before idle events: utilisation is derived from trips, so on a partial
+        # write the more fundamental record should be the one that survives.
+        totals.trips += postgres.write_trips(result.trips)
 
     if result.idle_segments:
         counts.idle_events = postgres.write_idle_events(result.idle_segments)
@@ -377,6 +393,7 @@ def _report(totals: RunTotals, elapsed: float, processor: BatchProcessor) -> Non
     for reason, count in sorted(totals.dlq_reasons.items(), key=lambda kv: -kv[1]):
         logger.info("      %-28s %d", reason, count)
     logger.info("idle events written  : %d", totals.idle_events)
+    logger.info("trips written        : %d", totals.trips)
     logger.info("alerts written       : %d", totals.alerts)
     logger.info("unknown vehicles     : %d", totals.unknown_vehicle)
     logger.info("vehicles tracked     : %d", processor.tracked_vehicles)
