@@ -102,7 +102,7 @@ section. `Dn` = open decision.
 | PDF-13 | One-command local setup | `docker-compose.yml`, `Makefile`, `make.ps1` | all four stores healthy | Done |
 | PDF-13 | Containerised services | `infra/docker/python-service.Dockerfile` | non-root, multi-stage, builds | Done |
 | PDF-12 | CI on every push | `.github/workflows/ci.yml` | quality, contract, security, integration | Done |
-| PDF-12 | 80%+ coverage on core logic | `pyproject.toml` gate, CI | **85.75%**, 432 tests | Done |
+| PDF-12 | 80%+ coverage on core logic | `pyproject.toml` gate, CI | **84.18%**, 577 tests; `docs/evidence/coverage/` | Done |
 | PDF-13 | 3-5 ADRs | `docs/adr/0001`-`0006` | 6 written | Done |
 | CM-3 | No secrets in the repository | `.env.example`, NOLOGIN DB roles | `test_no_migration_contains_a_hardcoded_password` | Done |
 | CM-4 | Redis pinned to 7.2.x for licence reasons | `docker-compose.yml` | ADR-0002 note | Done |
