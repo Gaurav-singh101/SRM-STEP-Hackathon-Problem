@@ -98,10 +98,10 @@ test-integration: ## Integration tests against real infrastructure (Testcontaine
 
 .PHONY: test-acceptance
 test-acceptance: ## BDD acceptance scenarios
-	$(UV) run behave tests/acceptance
+	$(UV) run behave
 
 .PHONY: verify
-verify: lint test ## Everything CI enforces, in one command
+verify: lint test test-acceptance ## Everything CI enforces, in one command
 
 # --- Evidence -------------------------------------------------------------
 

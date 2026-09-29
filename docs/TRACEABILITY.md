@@ -72,6 +72,9 @@ section. `Dn` = open decision.
 | CM-10 | Health and readiness probes | `main.py::healthz`, `readyz` | `test_api.py` | Done |
 | D11 | Money exact end to end, never a float | `schemas.py` serialisers | `test_money_is_serialised_as_a_string` | Done |
 | CM-14 | Every figure shows its assumptions | `schemas.py::Assumptions`, `components/common.tsx` | `test_summary_declares_its_assumptions` | Done |
+| PDF-12 | BDD acceptance scenarios for the key user stories | `tests/acceptance/features/` | 4 features, 19 scenarios, 105 steps; `docs/evidence/acceptance/` | Done |
+| CM-14 | Utilisation coverage stated, never implied | `utilisation_window` table, `UtilisationCoverage` | `test_utilisation_window.py` (7 unit + 7 integration) | Done |
+| D10 | Alert latency split from data age | `AlertRow.processing_latency_seconds` | `test_a_replayed_alert_is_flagged_...` | Done |
 | D9 | Partial totals declared, BEVs never zeroed | `schemas.py`, `PartialTotalNotice` | `test_summary_flags_a_partial_cost_total` | Done |
 | CM-14 | Fleet Overview view | `web/src/pages/FleetOverview.tsx` | - | Done |
 | CM-14 | Idle Cost Leaderboard view | `web/src/pages/IdleLeaderboard.tsx` | - | Done |
@@ -87,7 +90,6 @@ section. `Dn` = open decision.
 |---|---|---|---|
 | D3 | Utilisation scoring wired into rollups | `services/batch` | **Planned (Day 2)** |
 | D6 | Rollups and late-event reconciliation | `services/batch` | **Planned (Day 2)** |
-| PDF-12 | BDD acceptance scenarios | `tests/acceptance/` | **Planned (Day 2)** |
 | PDF-9 | Geohash depot grouping, top-K, DTC surfacing | `libs/`, `web/` | **Partial** - DTC parsing done |
 | PDF-11 | Load, soak and chaos evidence | `docs/evidence/` | **Planned (Day 3)** |
 | PDF-13 | Terraform, Helm, STRIDE | `infra/`, `docs/STRIDE.md` | **Planned (Day 3)** |

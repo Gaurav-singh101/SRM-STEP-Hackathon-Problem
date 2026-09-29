@@ -1,0 +1,80 @@
+<testsuite name="idle_cost.Finding the idle cost, and trusting the number" tests="5" errors="0" failures="0" skipped="0" time="0.047464" timestamp="2026-09-29T17:28:32.032812" hostname="Gaurav_Singh"><testcase classname="idle_cost.Finding the idle cost, and trusting the number" name="The vehicles costing the most idle fuel come first" status="passed" time="0.007063"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: The vehicles costing the most idle fuel come first
+    Given a fleet finance manager signed in to "tenant-alpha" ... passed in 0.000s
+    Given a fleet where the idle cost is concentrated in a few vehicles ... passed in 0.000s
+    When they open the idle cost leaderboard ... passed in 0.007s
+    Then the request succeeds ... passed in 0.000s
+    And the worst offender is listed first ... passed in 0.000s
+    And every vehicle carries its own estimated cost ... passed in 0.000s
+    And the list is marked as an estimate ... passed in 0.000s
+    And the access is recorded in the audit trail ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase><testcase classname="idle_cost.Finding the idle cost, and trusting the number" name="The fleet total says what it is based on" status="passed" time="0.010667"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: The fleet total says what it is based on
+    Given a fleet finance manager signed in to "tenant-alpha" ... passed in 0.003s
+    Given the fleet has 0 battery-electric vehicles with no fuel cost ... passed in 0.000s
+    When they open the fleet overview ... passed in 0.007s
+    Then the request succeeds ... passed in 0.000s
+    And the total cost is 3733.5017 ... passed in 0.000s
+    And the cost is exact to the last paisa ... passed in 0.000s
+    And the figure states the formula, threshold and fuel price behind it ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase><testcase classname="idle_cost.Finding the idle cost, and trusting the number" name="A total that cannot cover the whole fleet says so" status="passed" time="0.014658"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: A total that cannot cover the whole fleet says so
+    Given a fleet finance manager signed in to "tenant-alpha" ... passed in 0.003s
+    Given the fleet has 14 battery-electric vehicles with no fuel cost ... passed in 0.000s
+    When they open the fleet overview ... passed in 0.012s
+    Then the request succeeds ... passed in 0.000s
+    And the total is flagged as covering only part of the fleet ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase><testcase classname="idle_cost.Finding the idle cost, and trusting the number" name="A single idle event carries its own cost and assumptions" status="passed" time="0.00773"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: A single idle event carries its own cost and assumptions
+    Given a fleet finance manager signed in to "tenant-alpha" ... passed in 0.000s
+    Given an idle event of 15 minutes that cost 34.6875 ... passed in 0.000s
+    When they open the idle event list ... passed in 0.008s
+    Then the request succeeds ... passed in 0.000s
+    And the access is recorded in the audit trail ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase><testcase classname="idle_cost.Finding the idle cost, and trusting the number" name="Nobody sees anything without signing in" status="passed" time="0.007345"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: Nobody sees anything without signing in
+    Given a fleet finance manager signed in to "tenant-alpha" ... passed in 0.000s
+    When they request the view without signing in ... passed in 0.007s
+    Then the request is refused as unauthenticated ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+
+Captured stdout:
+
+
+]]>
+</system-out><system-err>
+<![CDATA[
+Captured stderr:
+
+GET /api/v1/fleet/summary -> 401 unauthenticated [433d1629-da14-4c85-a44c-eb2df9fde0e6]
+
+]]>
+</system-err></testcase></testsuite>

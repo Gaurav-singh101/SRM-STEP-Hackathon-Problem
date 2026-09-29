@@ -1,0 +1,77 @@
+<testsuite name="attention.Seeing what needs attention, with a latency figure that means something" tests="5" errors="0" failures="0" skipped="0" time="0.041367" timestamp="2026-09-29T17:28:31.814050" hostname="Gaurav_Singh"><testcase classname="attention.Seeing what needs attention, with a latency figure that means something" name="The queue holds only what has not been handled" status="passed" time="0.006879"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: The queue holds only what has not been handled
+    Given a fleet operations manager signed in to "tenant-alpha" ... passed in 0.007s
+    Given the attention list holds ... passed in 0.000s
+      | type           | severity | acknowledged |
+      | excessive_idle | warning  | no           |
+      | excessive_idle | critical | no           |
+      | excessive_idle | warning  | yes          |
+    When they open the attention list ... passed in 0.000s
+    Then the request succeeds ... passed in 0.000s
+    And 2 alerts need attention ... passed in 0.000s
+    And each alert carries the detail needed to act on it ... passed in 0.000s
+    And the access is recorded in the audit trail ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase><testcase classname="attention.Seeing what needs attention, with a latency figure that means something" name="Handled alerts can still be reviewed on request" status="passed" time="0.0"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: Handled alerts can still be reviewed on request
+    Given a fleet operations manager signed in to "tenant-alpha" ... passed in 0.000s
+    Given the attention list holds ... passed in 0.000s
+      | type           | severity | acknowledged |
+      | excessive_idle | warning  | no           |
+      | excessive_idle | warning  | yes          |
+    When they review the attention list including handled alerts ... passed in 0.000s
+    Then the request succeeds ... passed in 0.000s
+    And 2 alerts need attention ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase><testcase classname="attention.Seeing what needs attention, with a latency figure that means something" name="A live alert reports how fast the system reacted" status="passed" time="0.007933"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: A live alert reports how fast the system reacted
+    Given a fleet operations manager signed in to "tenant-alpha" ... passed in 0.001s
+    Given an alert raised from live telemetry 2.86 seconds after the event ... passed in 0.000s
+    When they open the attention list ... passed in 0.007s
+    Then the request succeeds ... passed in 0.000s
+    And the reaction time is reported as 2.86 seconds ... passed in 0.000s
+    And the alert is not flagged as replayed ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase><testcase classname="attention.Seeing what needs attention, with a latency figure that means something" name="A replayed alert does not pass its data age off as a reaction time" status="passed" time="0.00672"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: A replayed alert does not pass its data age off as a reaction time
+    Given a fleet operations manager signed in to "tenant-alpha" ... passed in 0.000s
+    Given an alert raised from a backfill of 24 hours of history ... passed in 0.000s
+    When they open the attention list ... passed in 0.007s
+    Then the request succeeds ... passed in 0.000s
+    And the alert is flagged as coming from replayed history ... passed in 0.000s
+    And the data age is not presented as the reaction time ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase><testcase classname="attention.Seeing what needs attention, with a latency figure that means something" name="The fleet trend can be read as a direction" status="passed" time="0.019834"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: The fleet trend can be read as a direction
+    Given a fleet operations manager signed in to "tenant-alpha" ... passed in 0.003s
+    When they open the fleet trend ... passed in 0.016s
+    Then the request succeeds ... passed in 0.000s
+    And the trend has one point per day ... passed in 0.000s
+    And every point carries both idle hours and cost ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase></testsuite>

@@ -1,0 +1,63 @@
+<testsuite name="trust.The conditions under which fleet data may be shown at all" tests="4" errors="0" failures="0" skipped="0" time="0.034973" timestamp="2026-09-29T17:28:32.192264" hostname="Gaurav_Singh"><testcase classname="trust.The conditions under which fleet data may be shown at all" name="One tenant cannot reach another tenant's vehicle" status="passed" time="0.013833"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: One tenant cannot reach another tenant's vehicle
+    Given a vehicle "ZZAAAAAAAAAAAAAAA" belonging to "tenant-bravo" ... passed in 0.000s
+    And a fleet operations manager signed in to "tenant-alpha" ... passed in 0.007s
+    When they look up vehicle "ZZAAAAAAAAAAAAAAA" ... passed in 0.006s
+    Then the vehicle is reported as not found ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+
+Captured stdout:
+
+
+]]>
+</system-out><system-err>
+<![CDATA[
+Captured stderr:
+
+GET /api/v1/vehicles/ZZAAAAAAAAAAAAAAA -> 404 not-found [1d03a9f4-eed4-47b9-9a4f-7bdeb02c86b8]
+
+]]>
+</system-err></testcase><testcase classname="trust.The conditions under which fleet data may be shown at all" name="A tenant can reach its own vehicle" status="passed" time="0.0"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: A tenant can reach its own vehicle
+    Given a vehicle "ZZAAAAAAAAAAAAAAA" belonging to "tenant-alpha" ... passed in 0.000s
+    And a fleet operations manager signed in to "tenant-alpha" ... passed in 0.000s
+    When they look up vehicle "ZZAAAAAAAAAAAAAAA" ... passed in 0.000s
+    Then the request succeeds ... passed in 0.000s
+    And the access is recorded in the audit trail ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase><testcase classname="trust.The conditions under which fleet data may be shown at all" name="A finance manager sees the cost, not where the driver parked" status="passed" time="0.012525"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: A finance manager sees the cost, not where the driver parked
+    Given a fleet finance manager signed in to "tenant-alpha" ... passed in 0.000s
+    And an idle event recorded at a precise location ... passed in 0.000s
+    When they open the idle event list ... passed in 0.013s
+    Then the request succeeds ... passed in 0.000s
+    And the location is coarsened ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase><testcase classname="trust.The conditions under which fleet data may be shown at all" name="An operations manager needs the precise location to act on it" status="passed" time="0.008615"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: An operations manager needs the precise location to act on it
+    Given a fleet operations manager signed in to "tenant-alpha" ... passed in 0.001s
+    And an idle event recorded at a precise location ... passed in 0.000s
+    When they open the idle event list ... passed in 0.003s
+    Then the request succeeds ... passed in 0.005s
+    And the location is precise ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase></testsuite>

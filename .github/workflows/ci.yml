@@ -60,12 +60,26 @@ jobs:
             --cov-report=xml:docs/evidence/coverage/coverage.xml \
             --cov-fail-under=80
 
+      # Runs beside the unit tests rather than in its own job: the scenarios drive the
+      # real app over a fake data layer, so they need no infrastructure and finish in
+      # well under a second.
+      - name: BDD acceptance scenarios
+        run: uv run behave --no-capture --junit --junit-directory docs/evidence/acceptance
+
       - name: Upload coverage evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ github.sha }}
           path: docs/evidence/coverage/
+          if-no-files-found: warn
+
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-${{ github.sha }}
+          path: docs/evidence/acceptance/
           if-no-files-found: warn
 
   contract:

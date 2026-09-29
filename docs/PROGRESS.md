@@ -4,6 +4,66 @@ Session handoff record (CLAUDE.md S17). Newest first.
 
 ---
 
+## 2026-09-29 - Day 2: acceptance scenarios, and a field that was lying
+
+Two things: the BDD suite PDF S12 requires, and a coverage figure that was reported as
+zero on every response.
+
+### Done and verified
+
+| Area | State | Evidence |
+|---|---|---|
+| BDD acceptance | 4 features, 19 scenarios, 105 steps, one feature per product question | `docs/evidence/acceptance/` |
+| behave wired in | `behave.ini`, `make test-acceptance`, `./make.ps1 test-acceptance`, CI job, JUnit artefact | runs in 0.19 s, no infrastructure |
+| Utilisation coverage | `utilisation_window` table written by the batch job, read by the API, rendered on the page | migration 008, 7 unit + 7 integration cases |
+| Utilisation and alerts endpoints | Had **no HTTP-level tests at all**; now 19 | `services/api/tests/test_utilisation_and_alerts.py` |
+| Dead code removed | 5 duplicate helpers in `api/testing.py` | `ruff`, 60 API tests still green |
+
+### Findings worth keeping
+
+- **`unscored_no_telemetry` was declared and never populated.** It sat in the API schema
+  and the TypeScript types, defaulting to 0, so every response said no vehicles were
+  unscored while the batch job had just failed to score 1,808. A field that states a
+  reassuring number as a fact is worse than no field, because a reader has no reason to
+  doubt it.
+- **The API could not have derived the number honestly.** "Not scored" has two causes -
+  no telemetry reached us, and the vehicle's class had too few peers - and they lead to
+  opposite actions. Counting "active vehicles without a score row" would have collapsed
+  them and answered neither, so the batch job records what it observed and the API reads
+  it back.
+- **The CHECK constraint is the useful part.** `scored + no_telemetry + class_too_small =
+  vehicles_active` means a miscount fails the write instead of showing a plausible wrong
+  total. The dataclass raises too, but a future backfill or manual correction would not
+  go through the dataclass.
+- **An inner join was hiding vehicles.** `load_window_activity` joined from
+  `vehicle_daily`, so a vehicle with no rows at all was invisible rather than counted as
+  unscored - the fleet total would quietly shrink to whatever reported. Now a LEFT JOIN
+  from `vehicles`.
+- **behave exec()s `environment.py` and the steps outside any package**, so they cannot
+  import from each other; shared vocabulary has to live in the steps module or an
+  installed package.
+- **Two step patterns were ambiguous** because `{view}` matched a longer phrase. Fixed by
+  giving each step a distinct literal prefix rather than by loosening the parser.
+- **The suite was mutation-checked.** Forcing the route to return `coverage=None` failed
+  exactly one scenario with the right message; reverting restored 19 passed. A green BDD
+  suite that cannot fail is decoration.
+- **One assertion I wrote was a tautology** (`Decimal(raw) == Decimal(raw)`). Replaced
+  with a check that the money string kept its 4-decimal scale, which is the property that
+  actually matters on the wire.
+- **400 vs 422 is a real split in the API** and is now pinned by tests rather than left to
+  surprise a client: the band allow-list is an application check (400), query constraints
+  are enforced by FastAPI from the route signature (422).
+
+### Next
+
+1. Vehicle Detail view, the fifth view in CLAUDE.md S14.
+2. Late-event reconciliation from `telemetry.late` (D6).
+3. ADRs for D6, D9, D10, D11.
+4. Day 3: load and soak evidence, security scans, chaos tests, SQL query plans,
+   Terraform written and validated but not applied (Option A), Helm on local k3d, STRIDE.
+
+---
+
 ## 2026-09-29 - Day 2: right to erasure across every store
 
 PDF S11 requires a right-to-erasure flow and S12 requires it tested. Built it as a batch

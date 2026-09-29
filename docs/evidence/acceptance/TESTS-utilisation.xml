@@ -1,0 +1,82 @@
+<testsuite name="utilisation.Finding under-used vehicles without mistaking silence for idleness" tests="5" errors="0" failures="0" skipped="0" time="0.064496" timestamp="2026-09-29T17:28:32.395746" hostname="Gaurav_Singh"><testcase classname="utilisation.Finding under-used vehicles without mistaking silence for idleness" name="The under-used vehicles are on the first page" status="passed" time="0.013774"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: The under-used vehicles are on the first page
+    Given a fleet operations manager signed in to "tenant-alpha" ... passed in 0.000s
+    Given the utilisation scores are ... passed in 0.000s
+      | score | band   | active_days | moving | distance | reason |
+      | 74.0  | normal | 0.80        | 0.76   | 0.79     |        |
+      | 12.5  | low    | 0.18        | 0.14   | 0.20     |        |
+      | 45.0  | normal | 0.50        | 0.48   | 0.52     |        |
+    When they open the utilisation view ... passed in 0.014s
+    Then the request succeeds ... passed in 0.000s
+    And the under-used vehicles appear before the healthy ones ... passed in 0.000s
+    And each vehicle shows the three components behind its score ... passed in 0.000s
+    And the access is recorded in the audit trail ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase><testcase classname="utilisation.Finding under-used vehicles without mistaking silence for idleness" name="A vehicle whose own signals disagree is reported separately, not as low" status="passed" time="0.016288"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: A vehicle whose own signals disagree is reported separately, not as low
+    Given a fleet operations manager signed in to "tenant-alpha" ... passed in 0.000s
+    Given the utilisation scores are ... passed in 0.000s
+      | score | band     | active_days | moving | distance | reason                                 |
+      | 31.0  | abnormal | 0.95        | 0.11   | 0.14     | out almost every day but barely moving |
+      | 22.0  | low      | 0.20        | 0.18   | 0.21     |                                        |
+    When they open the utilisation view ... passed in 0.014s
+    Then the request succeeds ... passed in 0.000s
+    And the abnormal vehicle explains itself in words ... passed in 0.003s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase><testcase classname="utilisation.Finding under-used vehicles without mistaking silence for idleness" name="Filtering to one band returns only that band" status="passed" time="0.011583"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: Filtering to one band returns only that band
+    Given a fleet operations manager signed in to "tenant-alpha" ... passed in 0.002s
+    Given the utilisation scores are ... passed in 0.003s
+      | score | band   | active_days | moving | distance | reason |
+      | 18.0  | low    | 0.20        | 0.18   | 0.22     |        |
+      | 66.0  | normal | 0.70        | 0.68   | 0.72     |        |
+    When they filter the utilisation view to the "low" band ... passed in 0.007s
+    Then the request succeeds ... passed in 0.000s
+    And only vehicles in the "low" band are listed ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase><testcase classname="utilisation.Finding under-used vehicles without mistaking silence for idleness" name="The page says how much of the fleet it could actually score" status="passed" time="0.008696"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: The page says how much of the fleet it could actually score
+    Given a fleet operations manager signed in to "tenant-alpha" ... passed in 0.000s
+    Given the utilisation scores are ... passed in 0.000s
+      | score | band | active_days | moving | distance | reason |
+      | 15.0  | low  | 0.16        | 0.15   | 0.18     |        |
+    And 180 of 2000 active vehicles were scored, 1808 having no telemetry and 12 in a class too small ... passed in 0.000s
+    When they open the utilisation view ... passed in 0.007s
+    Then the request succeeds ... passed in 0.000s
+    And the view reports that 180 of 2000 vehicles were scored ... passed in 0.001s
+    And vehicles with no telemetry are counted separately from unused ones ... passed in 0.001s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase><testcase classname="utilisation.Finding under-used vehicles without mistaking silence for idleness" name="Nothing scored yet is not the same as everything scored" status="passed" time="0.014155"><system-out>
+<![CDATA[
+@scenario.begin
+  Scenario: Nothing scored yet is not the same as everything scored
+    Given a fleet operations manager signed in to "tenant-alpha" ... passed in 0.005s
+    Given no utilisation window has been scored yet ... passed in 0.002s
+    When they open the utilisation view ... passed in 0.007s
+    Then the request succeeds ... passed in 0.000s
+    And the view does not claim full coverage ... passed in 0.000s
+
+@scenario.end
+--------------------------------------------------------------------------------
+]]>
+</system-out></testcase></testsuite>

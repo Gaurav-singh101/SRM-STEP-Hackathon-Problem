@@ -61,6 +61,7 @@ switch ($Target.ToLowerInvariant()) {
             @{ n = 'test';             d = "Unit tests with the $CovMin% coverage gate" }
             @{ n = 'test-unit';        d = 'Unit tests only, no infrastructure needed' }
             @{ n = 'test-integration'; d = 'Integration tests (needs Docker)' }
+            @{ n = 'test-acceptance';  d = 'BDD acceptance scenarios (behave)' }
             @{ n = 'verify';           d = 'lint + test, everything CI enforces' }
             @{ n = 'sim';              d = 'Run the simulator: ./make.ps1 sim -N 5000' }
             @{ n = 'seed';             d = 'Seed the reference dataset' }
@@ -122,9 +123,16 @@ switch ($Target.ToLowerInvariant()) {
         Invoke-Step 'pytest -m integration' { uv run pytest -m integration }
     }
 
+    'test-acceptance' {
+        # No Docker needed: the scenarios drive the real app over a fake data layer, so
+        # they stay fast enough to run on every push.
+        Invoke-Step 'behave' { uv run behave }
+    }
+
     'verify' {
         & $PSCommandPath 'lint'
         & $PSCommandPath 'test'
+        & $PSCommandPath 'test-acceptance'
     }
 
     'sim'  { Invoke-Step "simulator ($N vehicles)" { uv run python -m simulator --vehicles $N } }
