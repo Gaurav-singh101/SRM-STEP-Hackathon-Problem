@@ -143,3 +143,59 @@ export interface Problem {
   correlation_id: string;
   instance?: string;
 }
+
+export interface UtilisationEntry {
+  vin: string;
+  registration: string;
+  vehicle_class: string;
+  powertrain: string;
+  fleet_name: string;
+  score: number;
+  band: string;
+  /** Each component is normalised to 0-1 against the class median. */
+  active_day_component: number;
+  moving_hours_component: number;
+  distance_component: number;
+  idle_share: number;
+  /** Gap between the highest and lowest component; decides the `abnormal` band. */
+  component_spread: number;
+  /** Plain-language explanation, present only for `abnormal`. */
+  abnormal_reason: string | null;
+  window_days: number;
+  /** Peers the baseline was built from: a score from 5 is weaker than one from 500. */
+  baseline_sample_size: number;
+  formula_version: string;
+}
+
+export interface UtilisationPage {
+  items: UtilisationEntry[];
+  page: PageMeta;
+  /** Vehicles left unscored because no telemetry reached us. Not the same as unused. */
+  unscored_no_telemetry: number;
+}
+
+export interface AlertEntry {
+  alert_id: number;
+  vin: string;
+  registration: string;
+  alert_type: string;
+  severity: string;
+  triggering_event_ts: string;
+  persisted_at: string;
+  /** The D10 SLO. Meaningful for live streaming only. */
+  end_to_end_latency_seconds: number;
+  /** From the processor receiving the event to the alert being durable. Always valid. */
+  processing_latency_seconds: number | null;
+  /** True when this alert came from replayed history rather than live telemetry. */
+  is_backfill: boolean;
+  idle_event_started_at: string | null;
+  detail: Record<string, unknown>;
+  acknowledged: boolean;
+}
+
+export interface AlertsResponse {
+  items: AlertEntry[];
+  unacknowledged_only: boolean;
+  max_processing_latency_seconds: number | null;
+  contains_backfill: boolean;
+}

@@ -530,3 +530,60 @@ code {
     align-items: flex-start;
   }
 }
+
+/* --- component bars ------------------------------------------------------ */
+
+/*
+ * A bar plus its number. The bar makes three components read as a shape at a glance,
+ * and the number keeps it precise - neither alone is enough.
+ */
+.bar {
+  position: relative;
+  min-width: 68px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.bar__fill {
+  height: 100%;
+  background: var(--accent-2);
+  opacity: 0.55;
+}
+
+.bar__text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 5px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* An explanatory row directly under the row it explains. */
+.row--note td {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+/* Text as well as colour: never colour alone (CLAUDE.md S14 accessibility). */
+.over-target {
+  color: var(--danger);
+  font-weight: 650;
+}
+
+.over-target::after {
+  content: ' over target';
+  font-size: 11px;
+  font-weight: 400;
+}

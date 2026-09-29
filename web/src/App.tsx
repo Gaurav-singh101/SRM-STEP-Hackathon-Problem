@@ -11,10 +11,12 @@ import type { ReactNode } from 'react';
 
 import { devLogin, hasAccessToken } from './api/client';
 import { ErrorState } from './components/common';
+import { Attention } from './pages/Attention';
 import { FleetOverview } from './pages/FleetOverview';
 import { IdleLeaderboard } from './pages/IdleLeaderboard';
+import { Utilisation } from './pages/Utilisation';
 
-type View = 'overview' | 'leaderboard';
+type View = 'overview' | 'leaderboard' | 'utilisation' | 'attention';
 
 const WINDOWS = [7, 30, 90] as const;
 
@@ -77,14 +79,29 @@ export function App(): ReactNode {
         >
           Idle cost leaderboard
         </button>
+        <button
+          type="button"
+          className={`tab ${view === 'utilisation' ? 'is-active' : ''}`}
+          aria-current={view === 'utilisation' ? 'page' : undefined}
+          onClick={() => setView('utilisation')}
+        >
+          Utilisation
+        </button>
+        <button
+          type="button"
+          className={`tab ${view === 'attention' ? 'is-active' : ''}`}
+          aria-current={view === 'attention' ? 'page' : undefined}
+          onClick={() => setView('attention')}
+        >
+          Needs attention
+        </button>
       </nav>
 
       <main className="app__main">
-        {view === 'overview' ? (
-          <FleetOverview days={days} />
-        ) : (
-          <IdleLeaderboard days={days} />
-        )}
+        {view === 'overview' && <FleetOverview days={days} />}
+        {view === 'leaderboard' && <IdleLeaderboard days={days} />}
+        {view === 'utilisation' && <Utilisation />}
+        {view === 'attention' && <Attention />}
       </main>
 
       <footer className="app__footer">

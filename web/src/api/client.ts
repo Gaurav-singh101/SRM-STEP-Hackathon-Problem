@@ -7,11 +7,13 @@
  */
 
 import type {
+  AlertsResponse,
   FleetSummary,
   IdleEventPage,
   LeaderboardResponse,
   Problem,
   TrendResponse,
+  UtilisationPage,
   VehicleDetail,
 } from './types';
 
@@ -157,6 +159,19 @@ export const api = {
 
   leaderboard: (days: number, limit: number) =>
     request<LeaderboardResponse>('/api/v1/leaderboard/idle-cost', { days, limit }),
+
+  utilisation: (options: { pageSize?: number; cursor?: string; band?: string }) =>
+    request<UtilisationPage>('/api/v1/utilisation', {
+      page_size: options.pageSize,
+      cursor: options.cursor,
+      band: options.band,
+    }),
+
+  alerts: (options: { limit?: number; unacknowledgedOnly?: boolean }) =>
+    request<AlertsResponse>('/api/v1/alerts', {
+      limit: options.limit,
+      unacknowledged_only: options.unacknowledgedOnly,
+    }),
 
   vehicle: (vin: string) => request<VehicleDetail>(`/api/v1/vehicles/${vin}`),
 
