@@ -86,7 +86,7 @@ class KafkaSettings(_Base):
     kafka_topic_idle_events: str = "idle.events"
     kafka_topic_alerts: str = "alerts"
     kafka_consumer_group: str = "processor"
-    kafka_num_partitions: int = 24
+    kafka_num_partitions: int = 96
     kafka_replication_factor: int = 1
     # Batch size in the hot path. Per-event round trips are forbidden
     # (CLAUDE.md S3), so this is the unit of work everywhere downstream.

@@ -41,7 +41,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
-      KAFKA_NUM_PARTITIONS: 24
+      KAFKA_NUM_PARTITIONS: 96
       KAFKA_LOG_RETENTION_HOURS: 24
       CLUSTER_ID: fleet-intel-local-cluster
       # The local Docker VM has ~3.9 GB total for four datastores, so the broker
@@ -76,10 +76,14 @@ services:
         create() {
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$$BOOT"             --create --if-not-exists --topic "$$1"             --partitions "$$2" --replication-factor 1             --config retention.ms="$$3" $${4:-}
         }
-        # Partition counts from ADR-0004. telemetry.raw uses 24 because it
-        # divides by 2/3/4/6/8/12, so consumer count scales without a
-        # repartition. The side topics are low volume and need far fewer.
-        create telemetry.raw   24 86400000
+        # Partition counts from ADR-0004 (amended). telemetry.raw uses 96: the
+        # measured 4,404 events/s per consumer means ~23 consumers for the 100K
+        # events/s NFR, and partitions are a hard ceiling on consumer parallelism.
+        # 96 leaves 4.2x headroom and divides by 2/3/4/6/8/12/16/24/32/48.
+        # Chosen now because Kafka cannot shrink a topic, and growing one rewrites
+        # every key's partition mapping - which would split a vehicle's in-flight
+        # idle state across two consumers.
+        create telemetry.raw   96 86400000
         create telemetry.dlq    6 604800000   # kept 7 days: these need triage
         create telemetry.late   6 604800000   # reconciled by the batch job
         create idle.events     12 604800000

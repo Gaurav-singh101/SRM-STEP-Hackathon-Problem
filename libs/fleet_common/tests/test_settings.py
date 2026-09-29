@@ -200,12 +200,35 @@ def test_formula_versions_are_stamped() -> None:
 # --------------------------------------------------------------------------
 
 
+#: Measured single-consumer throughput, from docs/evidence/load/pipeline-end-to-end-local.md.
+MEASURED_CONSUMER_EVENTS_PER_SECOND = 4_404
+NFR_EVENTS_PER_SECOND = 100_000
+
+
 def test_kafka_partition_count_matches_adr_0004() -> None:
     settings = KafkaSettings(_env_file=None)
-    assert settings.kafka_num_partitions == 24
-    # 24 divides by 2/3/4/6/8/12, so consumer count scales without repartitioning.
-    for divisor in (2, 3, 4, 6, 8, 12):
+    assert settings.kafka_num_partitions == 96
+    # Divides by all of these, so consumer count scales without repartitioning.
+    for divisor in (2, 3, 4, 6, 8, 12, 16, 24, 32, 48):
         assert settings.kafka_num_partitions % divisor == 0
+
+
+def test_partition_count_leaves_headroom_above_the_consumers_the_nfr_needs() -> None:
+    """Partitions are a hard ceiling on consumer parallelism: one partition is read by
+    exactly one consumer, so a 25th consumer against 24 partitions simply idles.
+
+    At the measured throughput the NFR needs ~23 consumers. 24 partitions left none
+    spare for a failed consumer or a rolling deploy, and Kafka cannot shrink a topic
+    later - nor grow one safely, because that rewrites every key's partition mapping and
+    would split a vehicle's in-flight idle state across two consumers.
+    """
+    settings = KafkaSettings(_env_file=None)
+    consumers_needed = NFR_EVENTS_PER_SECOND / MEASURED_CONSUMER_EVENTS_PER_SECOND
+    headroom = settings.kafka_num_partitions / consumers_needed
+    assert headroom >= 3.0, (
+        f"only {headroom:.1f}x headroom over the ~{consumers_needed:.0f} consumers the "
+        "NFR needs; a single consumer failure would put throughput under target"
+    )
 
 
 def test_kafka_batches_rather_than_sending_per_event() -> None:

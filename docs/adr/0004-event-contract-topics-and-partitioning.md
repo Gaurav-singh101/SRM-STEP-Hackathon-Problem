@@ -51,10 +51,14 @@ the sink and the final safety net.
 | `idle.events` | Closed idle segments |
 | `alerts` | Real-time alerts (ADR-0010) |
 
-**Partition key is `vin`**, which guarantees per-vehicle ordering - required,
-because the idle state machine is a per-vehicle sequential fold. **24 partitions**:
-divisible by 2, 3, 4, 6, 8 and 12, so consumer count can scale without
-repartitioning. Locally replication factor 1; in cloud 3 with
+**Partition key is `vin`**, which guarantees per-vehicle ordering - required, because
+the idle state machine is a per-vehicle sequential fold; two partitions carrying one VIN
+would give two consumers half the story each and neither would detect the idle period.
+
+**96 partitions** (amended 2026-09-29; originally 24). A partition is read by exactly one
+consumer, so the count is a hard ceiling on parallelism. Measured consumer throughput of
+4,404 events/s means the NFR needs ~23 consumers, and 24 partitions left no headroom for
+a failure or a rolling deploy. See the amendment in ADR-0005 for the full analysis. Locally replication factor 1; in cloud 3 with
 `min.insync.replicas=2` and an idempotent producer at `acks=all`.
 
 **Capacity.** The PDF's S4 reference model assumes ~1 KB/event, giving ~8.8 TB/day

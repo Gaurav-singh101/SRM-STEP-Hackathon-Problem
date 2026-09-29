@@ -12,7 +12,7 @@ wait for the developer's answer, record an ADR, and only then treat it as final.
 | D2 | Fuel-consumption formula | **DECIDED** | ADR-0002 | Config burn-rate table + `fuel_rate_lph` cross-check. `Decimal` money. Rates are PROPOSED. |
 | D3 | Utilisation formula | **DECIDED** | ADR-0003 | Composite score, median/MAD with a 10% MAD floor added after testing. |
 | D4 | Authentication provider | **OPEN** | - | Interim: local OIDC stub, RS256, vendor swappable by env config. No vendor in code. ADR due when the stub lands. |
-| D5 | Stream-processing technology | **PROVISIONAL** | ADR-0005 | Python consumer group. Throughput **not yet measured**; Phase 1 exit gate decides whether batch envelopes are needed. |
+| D5 | Stream-processing technology | **DECIDED** | ADR-0005 | Python consumer group. Throughput measured: 4,404 events/s per consumer. Partitions raised 24 -> 96 for headroom; batch envelopes rejected with a reason. |
 | D6 | Batch/historical store | **OPEN** | - | Proposed: Postgres partitions + incremental rollups, Parquet cold tier behind an `ObjectStore` port. ADR due Day 2. |
 | D7 | Telemetry event schema | **DECIDED** | ADR-0004 | Extends the PDF example, which has no ignition/fuel signals. |
 | D8 | Kafka hosting on AWS | **OPEN** | - | Proposed: Strimzi on EKS for portability and cost; MSK as a Terraform module flag. Constrained by the free-tier account - see PROGRESS blocker B3. |
@@ -34,7 +34,10 @@ wait for the developer's answer, record an ADR, and only then treat it as final.
    at `docs/source/Motorq_Hackathon_Solution_Document_Template.md` (gap G13 closed).
 2. **AWS account type** - Academy Learner Lab or standard Free Tier. Learner Lab
    commonly blocks EKS and IAM role creation, which changes the Day 3 plan.
-3. **Partition count** - the measured consumer throughput (4,404 events/s per process)
-   implies ~23 consumers for 100K events/s against 24 provisioned partitions, which is
-   at the ceiling. Recommendation: raise `KAFKA_NUM_PARTITIONS` to 96. Needs a yes
-   before the cloud benchmark; ADR-0005 stays provisional until then.
+3. ~~Partition count~~ - **decided** 2026-09-29: raised to 96 (ADR-0005 amendment).
+4. **Cloud deployment approach** - **decided** 2026-09-29: write and validate Terraform
+   for AWS but do not apply it, and verify the Helm charts on a real local Kubernetes
+   cluster (k3d). The hackathon asks for "Terraform for at least one cloud" and an
+   architecture "deployable on at least one cloud", not a running cloud environment.
+   The available account is a free learning tier, so applying it is not viable. This
+   will be stated plainly in the solution document rather than implied.

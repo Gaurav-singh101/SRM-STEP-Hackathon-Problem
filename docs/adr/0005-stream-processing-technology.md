@@ -1,9 +1,9 @@
 # ADR-0005: Stream-processing technology
 
-- **Status:** Accepted, pending measurement
+- **Status:** Accepted (amended 2026-09-29 with measured throughput)
 - **Date:** 2026-09-29
 - **Resolves:** D5
-- **Classification:** Approved project decision. The throughput figures that justify it are **not yet measured**.
+- **Classification:** Approved project decision, now supported by measured throughput.
 
 ## Context
 
@@ -74,3 +74,59 @@ claim may appear anywhere in the repository or the solution document.
   producer side therefore needs about 4-5 processes, which is ordinary horizontal
   scaling. Evidence: `docs/evidence/load/simulator-produce-local.md`. The consumer
   side remains unmeasured, so this ADR stays **provisional**.
+
+
+---
+
+## Amendment, 2026-09-29: throughput measured, partition count raised to 96
+
+The risk this ADR recorded as unmeasured has now been measured end to end.
+
+| Stage | Rate | Scope |
+|---|---|---|
+| Generate only | 44,929 events/s | no broker |
+| Generate + produce | 23,697 events/s | 1 producer process |
+| **Full consumer pipeline** | **4,404 events/s** | **1 consumer process** |
+
+The consumer figure is the one that matters, and it is far below the producer's because
+it does far more: decode, schema and VIN validation, dedup against a sliding replay
+window, the per-vehicle idle state machine, cost estimation, then batched writes to
+three stores plus side topics. Evidence:
+`docs/evidence/load/pipeline-end-to-end-local.md` (LOCAL, not the NFR).
+
+**Consequence: 24 partitions was not enough.** A Kafka partition is read by exactly one
+consumer in a group, so the partition count is a hard ceiling on parallelism - a 25th
+consumer against 24 partitions simply idles. At 4,404 events/s the 100K events/s NFR
+needs about **23 consumers**, which against 24 partitions left effectively no headroom:
+one failed consumer, or a rolling deploy, and throughput drops below target. Cloud will
+make this worse rather than better, because replication factor 3 with
+`min.insync.replicas=2` costs latency on every write.
+
+**Decision: raise `telemetry.raw` to 96 partitions.**
+
+| Partitions | Max consumers | Headroom over the ~23 needed | Vehicles/partition | Hottest/mean |
+|---|---|---|---|---|
+| 24 | 24 | 1.0x | 4,167 | 1.042x |
+| 48 | 48 | 2.1x | 2,083 | 1.058x |
+| **96** | **96** | **4.2x** | **1,042** | **1.074x** |
+| 192 | 192 | 8.3x | 521 | 1.144x |
+
+(Computed over 100,000 VINs with librdkafka's `crc32 % partitions` partitioner, using
+the model validated against a real broker in `docs/evidence/load/partition-balance.md`.)
+
+More partitions means fewer vehicles each, so random variation shows up more and the
+busiest partition drifts further from the mean. At 192 that reaches 14%, which starts to
+matter; at 96 it is 7%, which does not. 96 also divides by 2, 3, 4, 6, 8, 12, 16, 24, 32
+and 48, so almost any consumer count divides evenly.
+
+**Why now rather than at the benchmark.** Kafka cannot reduce a topic's partition count
+at all, and *growing* one is not safe here either: the partition is chosen by
+`crc32(vin) % partition_count`, so changing the count remaps every VIN. A vehicle could
+move to a new partition while its half-finished idle segment sits in a consumer still
+reading the old one, splitting the state the idle state machine depends on. The
+asymmetry settles it: choosing too high costs a little broker metadata, choosing too low
+cannot be undone.
+
+The batch-envelope mitigation this ADR originally proposed is **not** adopted. It
+attacks per-message overhead, whereas the consumer's cost is dominated by per-event
+work, so it would help the producer far more than the half that needs help.
