@@ -4,6 +4,75 @@ Session handoff record (CLAUDE.md S17). Newest first.
 
 ---
 
+## 2026-09-29 - Day 1 continued: end-to-end pipeline working
+
+`simulator -> Kafka -> processor -> PostgreSQL + MongoDB + Redis` runs end to end, and
+the detector is checked against the simulator's ground truth rather than trusted.
+
+### Done and verified
+
+| Area | State | Evidence |
+|---|---|---|
+| Seed job | 100,000 vehicles in 16.6s, COPY per tenant under RLS | 100,000 distinct VINs, 0 missing a burn rate |
+| Processor adapters | Postgres/Mongo/Redis sinks, all batched and idempotent | 305,745 events processed |
+| Consumer loop | poll -> process -> persist -> flush -> commit | offsets committed last, always |
+| Accounting | 295,520 + 2,900 + 5,780 + 1,545 = 305,745 | exact; asserted every run |
+| Detection accuracy | **71 of 71 excessive idle periods, exact**; 259 of 260 billable | `docs/evidence/load/pipeline-end-to-end-local.md` |
+| BEV exclusion (D9) | 5 of 259 segments unpriced, all 5 BEVs | cost NULL, never zero |
+| Cost output | 254 priced rows, each carrying formula/burn rate/threshold/price_id | tenant-demo 3,733.50 INR, tenant-second 3,551.71 INR |
+
+**Test status:** 375 passed, **88.31% coverage**, gate 80%. Lint, format and
+`mypy --strict` clean.
+
+### Findings worth keeping
+
+- **`SET` accepts no bind parameters in PostgreSQL; `set_config()` does.** Hit this
+  twice - once in the isolation tests, once in the Postgres sink. There is now a
+  module-level note in `sinks.py` so it does not happen a third time.
+- **`ON CONFLICT` against a PARTIAL unique index must repeat the index predicate**, or
+  Postgres cannot infer the index and the insert fails outright.
+- **71 excessive segments produced 69 alerts, and that is correct.** Both un-alerted
+  segments were exactly 600 s while every alerted one was 660 s or more: they crossed
+  the threshold on the sample that *closed* them. `EXCESSIVE_IDLE_IN_PROGRESS` asserts
+  a vehicle is idling right now, so alerting on an ended period would send an operator
+  after a driver who is already moving. Documented as an invariant and tested.
+- **Duplicate and malformed counts reconcile exactly once you notice validation runs
+  before dedup.** A duplicated malformed event is rejected twice and never reaches the
+  dedup stage: 1,535 injected malformed + 10 = 1,545 rejected, and 2,910 injected
+  duplicates - 10 = 2,900 deduplicated.
+- **The alert suppression key was the triggering event's timestamp, not the segment's
+  start.** The identity being suppressed is the idle period, so the key now comes from
+  the segment.
+
+### Throughput, scoped
+
+| Stage | Rate | Scope |
+|---|---|---|
+| Generate only | 44,929 events/s | no broker |
+| Generate + produce | 23,697 events/s | 1 producer process |
+| **Full consumer pipeline** | **4,404 events/s** | **1 consumer process** |
+
+All LOCAL on a laptop whose Docker VM has ~3.9 GB for four datastores.
+
+### Open decision this raised
+
+At 4,404 events/s per consumer, 100,000 events/s needs roughly **23 consumer
+processes** against the 24 partitions ADR-0004 provisions. That is near the partition
+ceiling with no room to lose a consumer. Raising the partition count to 48 or 96 is the
+straightforward fix - cheap, and it preserves the design. Batch envelopes were the other
+candidate but attack per-message overhead, whereas the consumer's cost is dominated by
+per-event work. **To settle before the cloud benchmark; ADR-0005 remains provisional.**
+
+### Next
+
+1. FastAPI: `/api/v1/vehicles`, `/idle-events`, `/fleet/summary` with keyset pagination
+   and the local OIDC stub.
+2. React: Fleet Overview and Idle Cost Leaderboard.
+3. Gate 1 closes when one event is visibly traceable to one idle event and one cost
+   figure in the UI, with its assumptions shown.
+
+---
+
 ## 2026-09-29 - Day 1 continued: live stack, schema and simulator
 
 Docker was installed by the developer, unblocking B1. Everything below runs against
