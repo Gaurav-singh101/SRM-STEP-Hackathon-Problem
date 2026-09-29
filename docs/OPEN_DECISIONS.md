@@ -30,8 +30,11 @@ wait for the developer's answer, record an ADR, and only then treat it as final.
 
 ## Still needed from the developer
 
-1. **The Solution Document Template** was in `docs/source/` earlier and is now
-   absent. Section 13 of the PDF requires submitting against it, and it is needed
-   to produce the final PDF. Its 17-section structure is known and recorded.
+1. ~~The Solution Document Template~~ - **supplied** 2026-09-29, 17 sections confirmed
+   at `docs/source/Motorq_Hackathon_Solution_Document_Template.md` (gap G13 closed).
 2. **AWS account type** - Academy Learner Lab or standard Free Tier. Learner Lab
    commonly blocks EKS and IAM role creation, which changes the Day 3 plan.
+3. **Partition count** - the measured consumer throughput (4,404 events/s per process)
+   implies ~23 consumers for 100K events/s against 24 provisioned partitions, which is
+   at the ceiling. Recommendation: raise `KAFKA_NUM_PARTITIONS` to 96. Needs a yes
+   before the cloud benchmark; ADR-0005 stays provisional until then.
