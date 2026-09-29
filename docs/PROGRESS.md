@@ -4,6 +4,57 @@ Session handoff record (CLAUDE.md S17). Newest first.
 
 ---
 
+## 2026-09-29 - Day 2: right to erasure across every store
+
+PDF S11 requires a right-to-erasure flow and S12 requires it tested. Built it as a batch
+subcommand and ran it against the live stack.
+
+### Done and verified against the live stack
+
+| Area | State | Evidence |
+|---|---|---|
+| Erasure across four stores | `batch erase-driver`, per-store reporting, verified by reading back | `docs/evidence/compliance/erasure-local.md` |
+| Identity erased, business record kept | driver anonymised; 100 trips and 13 idle events retained with the link severed | run 1, read back through a different role |
+| MongoDB and Redis branches | 1 document unset, 2 cached keys removed | run 2 |
+| Erasure is itself audited | `erasure_log` opened before the first write, completed with a per-store summary | row read back |
+| Audit trail stays append-only | dedicated `fleet_erasure` role with a **column-level** `UPDATE (resource_id)` grant | `migrations/007`, privilege-boundary tests |
+| Tests | 42 integration cases including the privilege boundary and tenant isolation of the erasure path | `tests/integration/test_erasure.py` |
+
+### Findings worth keeping
+
+- **Two requirements pulled against each other and both were real.** Migration 003
+  revoked UPDATE on `audit_log` from every application role, because a trail the
+  application can rewrite is not evidence. But the trail names the subject, so erasing a
+  subject means reaching into it. Granting the batch role UPDATE would have undone the
+  first requirement to satisfy the second. Resolved with a NOLOGIN role holding a
+  column-level grant on `resource_id` alone: the subject reference is erasable, and
+  actor, action, timestamp and correlation id stay immutable.
+- **A failure per store is recorded, not raised.** Aborting on the first failure would
+  leave a subject erased from some stores and present in others with no record of which -
+  neither compliant nor recoverable. The CLI exits non-zero and says INCOMPLETE.
+- **`erase_driver` needed an explicit `conn.rollback()`** in the Postgres error path.
+  Postgres refuses every later statement on an aborted transaction, so without it the
+  audit write that records the failure would itself fail - defeating the point of
+  recording rather than raising.
+- **The operational record is read-only to the eraser.** `fleet_erasure` has SELECT and
+  no DELETE on `trips` and `idle_events`. Deleting them would erase the fleet's own record
+  of its fuel cost and make a past finance report irreproducible.
+- **Self-inflicted, worth recording:** while planting test data I ran
+  `updateMany({}, {$set: {driver_id: 663}}, {limit: 1})`. `limit` is not an `updateMany`
+  option, so the empty filter matched everything and stamped 3.6M telemetry documents
+  before it was killed. Undone by unsetting the field (3,621,336 modified, 0 remaining).
+  Synthetic data only, and nothing derived from it had been computed - but the lesson is
+  that an empty filter plus an ignored option is a silent full-collection write.
+
+### Next
+
+1. BDD acceptance scenarios (`tests/acceptance/`, behave) - explicit PDF S12 requirement.
+2. Vehicle Detail view, the fifth view in CLAUDE.md S14.
+3. Late-event reconciliation from `telemetry.late` (D6).
+4. ADRs for D6, D9, D10, D11.
+
+---
+
 ## 2026-09-29 - Day 1 continued: API and dashboard
 
 The Solution Document Template was supplied, closing gap G13. Built the API layer and

@@ -65,6 +65,8 @@ section. `Dn` = open decision.
 | CM-10 | Tenant isolation in the data-access layer | `api/adapters/repository.py::_scoped` | `test_tenant_isolation.py` (18 cases) | Done |
 | PDF-11 | Audit log on every data read | `repository.py::record_access` | `test_every_data_read_writes_an_audit_entry` | Done |
 | PDF-11, CM-11 | Location masking by role | `auth.py::coarsen_location` | `test_finance_role_receives_coarsened_coordinates` | Done |
+| PDF-11, CM-11 | Right to erasure across PostgreSQL, MongoDB and Redis | `services/batch/batch/erasure.py`, `batch erase-driver` | `test_erasure.py`, `docs/evidence/compliance/erasure-local.md` | Done |
+| PDF-11 | Audit trail stays append-only while erasure works | `migrations/007_erasure_role.sql` (column-level grant) | `test_erasure.py` privilege-boundary cases | Done |
 | CM-10 | Redis-backed rate limiting with Retry-After | `api/deps.py::RateLimiter` | `test_api.py` | Done |
 | CM-10 | Graceful degradation without Redis | `main.py::readyz` | `test_readyz_reports_degraded_without_redis` | Done |
 | CM-10 | Health and readiness probes | `main.py::healthz`, `readyz` | `test_api.py` | Done |
@@ -85,7 +87,6 @@ section. `Dn` = open decision.
 |---|---|---|---|
 | D3 | Utilisation scoring wired into rollups | `services/batch` | **Planned (Day 2)** |
 | D6 | Rollups and late-event reconciliation | `services/batch` | **Planned (Day 2)** |
-| PDF-11 | Right to erasure across all stores | `services/batch` | **Planned (Day 2)** |
 | PDF-12 | BDD acceptance scenarios | `tests/acceptance/` | **Planned (Day 2)** |
 | PDF-9 | Geohash depot grouping, top-K, DTC surfacing | `libs/`, `web/` | **Partial** - DTC parsing done |
 | PDF-11 | Load, soak and chaos evidence | `docs/evidence/` | **Planned (Day 3)** |
