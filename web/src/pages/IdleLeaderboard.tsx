@@ -13,16 +13,15 @@ import type { ReactNode } from 'react';
 
 import { api } from '../api/client';
 import {
-  AssumptionsNote,
   Badge,
   DataTable,
   EmptyState,
   ErrorState,
   LoadingState,
-  formatDateTime,
   formatHours,
   formatMoney,
 } from '../components/common';
+import { IdleEventList } from '../components/IdleEventList';
 
 const HEADERS = [
   '#',
@@ -35,7 +34,13 @@ const HEADERS = [
   'Excessive',
 ] as const;
 
-export function IdleLeaderboard({ days }: { days: number }): ReactNode {
+export function IdleLeaderboard({
+  days,
+  onOpenVehicle,
+}: {
+  days: number;
+  onOpenVehicle: (vin: string) => void;
+}): ReactNode {
   const [limit, setLimit] = useState(20);
   const [selectedVin, setSelectedVin] = useState<string | null>(null);
 
@@ -93,7 +98,18 @@ export function IdleLeaderboard({ days }: { days: number }): ReactNode {
           >
             <td className="num">{row.rank}</td>
             <td>
-              <code className="vin">{row.vin}</code>
+              {/* A button, not a clickable cell: keyboard users need a real control,
+                  and the row's own click only expands the drill-down. */}
+              <button
+                type="button"
+                className="link"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenVehicle(row.vin);
+                }}
+              >
+                <code className="vin">{row.vin}</code>
+              </button>
               <span className="subtle"> {row.registration}</span>
             </td>
             <td>{row.vehicle_class.replace(/_/g, ' ')}</td>
@@ -112,93 +128,14 @@ export function IdleLeaderboard({ days }: { days: number }): ReactNode {
         ))}
       </DataTable>
 
-      {selectedVin && <VehicleIdleDetail vin={selectedVin} days={days} />}
-    </>
-  );
-}
-
-/**
- * The individual events behind one vehicle's total.
- *
- * This is the traceability step that makes the leaderboard trustworthy: a user can go
- * from a fleet figure to the specific idle periods that produced it, each with its own
- * assumptions and data-quality signal.
- */
-function VehicleIdleDetail({ vin, days }: { vin: string; days: number }): ReactNode {
-  const events = useQuery({
-    queryKey: ['idle-events', vin, days],
-    queryFn: () => api.idleEvents({ days, vin, pageSize: 20 }),
-  });
-
-  return (
-    <section className="panel" aria-label={`Idle events for ${vin}`}>
-      <h2 className="panel__title">
-        Idle events for <code className="vin">{vin}</code>
-      </h2>
-
-      {events.isPending && <LoadingState label="Loading idle events…" />}
-      {events.isError && (
-        <ErrorState error={events.error} onRetry={() => void events.refetch()} />
+      {selectedVin && (
+        <section className="panel" aria-label={`Idle events for ${selectedVin}`}>
+          <h2 className="panel__title">
+            Idle events for <code className="vin">{selectedVin}</code>
+          </h2>
+          <IdleEventList vin={selectedVin} days={days} />
+        </section>
       )}
-
-      {events.isSuccess &&
-        (events.data.items.length === 0 ? (
-          <EmptyState
-            title="No idle events for this vehicle in the window"
-            hint="Its cost total may come from an earlier period."
-          />
-        ) : (
-          <>
-            <DataTable
-              caption={`Individual idle events for ${vin}`}
-              headers={['Started', 'Duration', 'Fuel (est)', 'Fuel (device)', 'Cost', 'Notes']}
-            >
-              {events.data.items.map((event) => (
-                <tr key={event.idle_event_id}>
-                  <td>{formatDateTime(event.started_at)}</td>
-                  <td className="num">
-                    {event.duration_minutes.toFixed(1)} min
-                    {event.excessive && (
-                      <>
-                        {' '}
-                        <Badge tone="warn">excessive</Badge>
-                      </>
-                    )}
-                  </td>
-                  <td className="num">
-                    {event.fuel_litres_est !== null
-                      ? `${event.fuel_litres_est.toFixed(3)} L`
-                      : '—'}
-                  </td>
-                  <td className="num">
-                    {/* The D2 cross-check. Shown beside the estimate so a wrong
-                        configured burn rate is visible rather than silent. */}
-                    {event.fuel_litres_measured !== null
-                      ? `${event.fuel_litres_measured.toFixed(3)} L`
-                      : <span className="subtle">not reported</span>}
-                  </td>
-                  <td className="num strong">
-                    {event.bev_excluded ? (
-                      <Badge tone="info">electric</Badge>
-                    ) : (
-                      formatMoney(event.cost_est, event.assumptions.currency)
-                    )}
-                  </td>
-                  <td className="subtle small">
-                    {event.max_gap_seconds > 30 && (
-                      <>gap {Math.round(event.max_gap_seconds)}s · </>
-                    )}
-                    {event.sample_count} samples
-                    {event.location_coarsened && ' · location coarsened'}
-                  </td>
-                </tr>
-              ))}
-            </DataTable>
-            {events.data.items[0] && (
-              <AssumptionsNote assumptions={events.data.items[0].assumptions} />
-            )}
-          </>
-        ))}
-    </section>
+    </>
   );
 }

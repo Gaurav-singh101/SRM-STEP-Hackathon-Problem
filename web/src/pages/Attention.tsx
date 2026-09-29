@@ -31,7 +31,11 @@ function describeAlert(type: string): string {
   return type;
 }
 
-export function Attention(): ReactNode {
+export function Attention({
+  onOpenVehicle,
+}: {
+  onOpenVehicle: (vin: string) => void;
+}): ReactNode {
   const [unacknowledgedOnly, setUnacknowledgedOnly] = useState(true);
 
   const alerts = useQuery({
@@ -97,7 +101,13 @@ export function Attention(): ReactNode {
               <tr key={alert.alert_id}>
                 <td>{formatDateTime(alert.triggering_event_ts)}</td>
                 <td>
-                  <code className="vin">{alert.vin}</code>
+                  <button
+                    type="button"
+                    className="link"
+                    onClick={() => onOpenVehicle(alert.vin)}
+                  >
+                    <code className="vin">{alert.vin}</code>
+                  </button>
                   <span className="subtle"> {alert.registration}</span>
                 </td>
                 <td>

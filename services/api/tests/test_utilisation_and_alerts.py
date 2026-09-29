@@ -15,10 +15,13 @@ from fastapi.testclient import TestClient
 
 from api.testing import (
     NOW,
+    TENANT_B,
     FakeRepository,
     make_alert_row,
     make_coverage,
     make_utilisation_row,
+    make_utilisation_snapshot,
+    make_vehicle_detail,
 )
 
 PROBLEM_JSON = "application/problem+json"
@@ -290,3 +293,96 @@ def test_the_alert_limit_is_capped(client: TestClient, auth_header: dict[str, st
     """
     response = client.get("/api/v1/alerts?limit=5000", headers=auth_header)
     assert response.status_code == 422
+
+
+# --------------------------------------------------------------- vehicle detail
+
+
+def test_a_vehicle_carries_its_own_utilisation_score(
+    client: TestClient, repo: FakeRepository, auth_header: dict[str, str]
+) -> None:
+    """The detail view answers "what is this vehicle doing", which needs both halves.
+
+    Cost without utilisation cannot tell a manager whether a van is expensive because it
+    works hard or expensive because it sits with the engine running.
+    """
+
+    vin = "ZZAAAAAAAAAAAAAAA"
+    repo.vehicles[vin] = make_vehicle_detail(
+        vin=vin, utilisation=make_utilisation_snapshot(score=18.4, band="low")
+    )
+    body = client.get(f"/api/v1/vehicles/{vin}", headers=auth_header).json()
+
+    assert body["utilisation"]["score"] == 18.4
+    assert body["utilisation"]["band"] == "low"
+    assert body["utilisation"]["baseline_sample_size"] == 240
+    assert body["utilisation"]["formula_version"] == "utilisation-v1"
+
+
+def test_an_unscored_vehicle_reports_null_rather_than_a_zero_score(
+    client: TestClient, repo: FakeRepository, auth_header: dict[str, str]
+) -> None:
+    """A zero score would read as "barely used" when the truth is "we do not know".
+
+    The vehicle still returns its master data and idle cost, because being unscored is not
+    a reason to hide the rest.
+    """
+
+    vin = "ZZAAAAAAAAAAAAAAA"
+    repo.vehicles[vin] = make_vehicle_detail(vin=vin, utilisation=None)
+    body = client.get(f"/api/v1/vehicles/{vin}", headers=auth_header).json()
+
+    assert body["utilisation"] is None
+    assert body["idle_event_count"] == 9
+    assert body["total_cost"] == "1250.5000"
+
+
+def test_an_abnormal_vehicle_explains_itself_on_its_own_page(
+    client: TestClient, repo: FakeRepository, auth_header: dict[str, str]
+) -> None:
+
+    vin = "ZZAAAAAAAAAAAAAAA"
+    repo.vehicles[vin] = make_vehicle_detail(
+        vin=vin,
+        utilisation=make_utilisation_snapshot(
+            band="abnormal", abnormal_reason="out almost every day but barely moving"
+        ),
+    )
+    body = client.get(f"/api/v1/vehicles/{vin}", headers=auth_header).json()
+    assert body["utilisation"]["abnormal_reason"] == "out almost every day but barely moving"
+
+
+def test_an_electric_vehicle_has_no_fuel_cost_but_still_has_a_score(
+    client: TestClient, repo: FakeRepository, auth_header: dict[str, str]
+) -> None:
+    """D9: BEVs are out of scope for idle fuel cost and in scope for utilisation.
+
+    A page that hid the score because the cost is null would drop the only figure that
+    applies to an electric vehicle.
+    """
+
+    vin = "ZZAAAAAAAAAAAAAAA"
+    repo.vehicles[vin] = make_vehicle_detail(
+        vin=vin,
+        powertrain="BEV",
+        burns_fuel=False,
+        total_cost=None,
+        utilisation=make_utilisation_snapshot(score=71.2, band="normal"),
+    )
+    body = client.get(f"/api/v1/vehicles/{vin}", headers=auth_header).json()
+
+    assert body["burns_fuel"] is False
+    assert body["total_cost"] is None
+    assert body["utilisation"]["score"] == 71.2
+
+
+def test_another_tenants_vehicle_is_absent_not_forbidden(
+    client: TestClient, repo: FakeRepository, auth_header: dict[str, str]
+) -> None:
+    """403 would confirm the VIN exists somewhere, which is itself a disclosure."""
+
+    vin = "ZZAAAAAAAAAAAAAAA"
+    repo.vehicles[vin] = make_vehicle_detail(vin=vin, tenant_id=TENANT_B)
+    response = client.get(f"/api/v1/vehicles/{vin}", headers=auth_header)
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith(PROBLEM_JSON)

@@ -1,9 +1,10 @@
 /**
  * Application shell: navigation, the reporting window, and development sign-in.
  *
- * Two views for now - Fleet Overview and Idle Cost Leaderboard - which are the two that
- * close Gate 1 by making one event traceable to one cost figure. The remaining three
- * views from CLAUDE.md S14 follow on Day 2.
+ * All five views from CLAUDE.md S14. The selected VIN lives here rather than inside
+ * Vehicle Detail, so clicking a vehicle on the leaderboard or the utilisation view can
+ * open it - which is what makes one fleet figure traceable to one vehicle and then to the
+ * individual idle periods behind it.
  */
 
 import { useState } from 'react';
@@ -15,8 +16,17 @@ import { Attention } from './pages/Attention';
 import { FleetOverview } from './pages/FleetOverview';
 import { IdleLeaderboard } from './pages/IdleLeaderboard';
 import { Utilisation } from './pages/Utilisation';
+import { VehicleDetail } from './pages/VehicleDetail';
 
-type View = 'overview' | 'leaderboard' | 'utilisation' | 'attention';
+type View = 'overview' | 'leaderboard' | 'utilisation' | 'attention' | 'vehicle';
+
+const TABS: ReadonlyArray<{ id: View; label: string }> = [
+  { id: 'overview', label: 'Fleet overview' },
+  { id: 'leaderboard', label: 'Idle cost leaderboard' },
+  { id: 'utilisation', label: 'Utilisation' },
+  { id: 'attention', label: 'Needs attention' },
+  { id: 'vehicle', label: 'Vehicle detail' },
+];
 
 const WINDOWS = [7, 30, 90] as const;
 
@@ -30,7 +40,14 @@ const TENANTS = ['tenant-demo', 'tenant-second'] as const;
 export function App(): ReactNode {
   const [view, setView] = useState<View>('overview');
   const [days, setDays] = useState<number>(30);
+  const [selectedVin, setSelectedVin] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState(hasAccessToken());
+
+  /** Open one vehicle from any other view, so a fleet figure stays traceable. */
+  function openVehicle(vin: string | null): void {
+    setSelectedVin(vin);
+    if (vin !== null) setView('vehicle');
+  }
 
   if (!signedIn) {
     return <DevSignIn onSignedIn={() => setSignedIn(true)} />;
@@ -63,45 +80,27 @@ export function App(): ReactNode {
       </header>
 
       <nav className="tabs" aria-label="Views">
-        <button
-          type="button"
-          className={`tab ${view === 'overview' ? 'is-active' : ''}`}
-          aria-current={view === 'overview' ? 'page' : undefined}
-          onClick={() => setView('overview')}
-        >
-          Fleet overview
-        </button>
-        <button
-          type="button"
-          className={`tab ${view === 'leaderboard' ? 'is-active' : ''}`}
-          aria-current={view === 'leaderboard' ? 'page' : undefined}
-          onClick={() => setView('leaderboard')}
-        >
-          Idle cost leaderboard
-        </button>
-        <button
-          type="button"
-          className={`tab ${view === 'utilisation' ? 'is-active' : ''}`}
-          aria-current={view === 'utilisation' ? 'page' : undefined}
-          onClick={() => setView('utilisation')}
-        >
-          Utilisation
-        </button>
-        <button
-          type="button"
-          className={`tab ${view === 'attention' ? 'is-active' : ''}`}
-          aria-current={view === 'attention' ? 'page' : undefined}
-          onClick={() => setView('attention')}
-        >
-          Needs attention
-        </button>
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={`tab ${view === tab.id ? 'is-active' : ''}`}
+            aria-current={view === tab.id ? 'page' : undefined}
+            onClick={() => setView(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
       </nav>
 
       <main className="app__main">
         {view === 'overview' && <FleetOverview days={days} />}
-        {view === 'leaderboard' && <IdleLeaderboard days={days} />}
-        {view === 'utilisation' && <Utilisation />}
-        {view === 'attention' && <Attention />}
+        {view === 'leaderboard' && <IdleLeaderboard days={days} onOpenVehicle={openVehicle} />}
+        {view === 'utilisation' && <Utilisation onOpenVehicle={openVehicle} />}
+        {view === 'attention' && <Attention onOpenVehicle={openVehicle} />}
+        {view === 'vehicle' && (
+          <VehicleDetail days={days} vin={selectedVin} onVinChange={setSelectedVin} />
+        )}
       </main>
 
       <footer className="app__footer">

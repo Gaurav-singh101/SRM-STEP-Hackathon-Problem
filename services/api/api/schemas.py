@@ -24,6 +24,7 @@ from api.adapters.repository import (
     IdleEventRow,
     LeaderboardRow,
     UtilisationRow,
+    UtilisationSnapshot,
     UtilisationWindowRow,
     VehicleDetail,
 )
@@ -239,6 +240,45 @@ class LeaderboardResponse(_Base):
     is_estimate: bool = True
 
 
+class VehicleUtilisation(_Base):
+    """This vehicle's utilisation score from the latest window.
+
+    Separate from the fleet-wide ``UtilisationEntry`` because the detail page asks a
+    different question: not "where does this vehicle rank" but "what is this vehicle
+    doing, and why does it score that way".
+    """
+
+    window_end: date
+    window_days: int
+    score: float
+    band: str
+    active_day_component: float
+    moving_hours_component: float
+    distance_component: float
+    idle_share: float
+    #: Plain-language explanation, present only for the `abnormal` band.
+    abnormal_reason: str | None
+    #: Peers the baseline was built from. A score from 5 is far weaker than one from 500.
+    baseline_sample_size: int
+    formula_version: str
+
+    @classmethod
+    def from_snapshot(cls, snapshot: UtilisationSnapshot) -> VehicleUtilisation:
+        return cls(
+            window_end=snapshot.window_end,
+            window_days=snapshot.window_days,
+            score=round(snapshot.score, 1),
+            band=snapshot.band,
+            active_day_component=round(snapshot.active_day_component, 3),
+            moving_hours_component=round(snapshot.moving_hours_component, 3),
+            distance_component=round(snapshot.distance_component, 3),
+            idle_share=round(snapshot.idle_share, 3),
+            abnormal_reason=snapshot.abnormal_reason,
+            baseline_sample_size=snapshot.baseline_sample_size,
+            formula_version=snapshot.formula_version,
+        )
+
+
 class VehicleResponse(_Base):
     """Vehicle master data plus idle totals."""
 
@@ -257,6 +297,10 @@ class VehicleResponse(_Base):
     total_idle_hours: float
     total_cost: Money | None
     currency: str | None
+    #: ``None`` when the latest window did not score this vehicle - because no telemetry
+    #: reached us, or because its class had too few peers for a usable baseline. Never a
+    #: zero score: "we could not score it" and "it scored badly" lead to opposite actions.
+    utilisation: VehicleUtilisation | None = None
 
     @field_serializer("total_cost")
     def _money(self, value: Decimal | None) -> str | None:
@@ -279,6 +323,11 @@ class VehicleResponse(_Base):
             total_idle_hours=round(detail.total_idle_hours, 2),
             total_cost=detail.total_cost,
             currency=detail.currency,
+            utilisation=(
+                VehicleUtilisation.from_snapshot(detail.utilisation)
+                if detail.utilisation is not None
+                else None
+            ),
         )
 
 

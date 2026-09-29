@@ -27,6 +27,7 @@ from api.adapters.repository import (
     IdleEventRow,
     LeaderboardRow,
     UtilisationRow,
+    UtilisationSnapshot,
     UtilisationWindowRow,
     VehicleDetail,
 )
@@ -197,6 +198,28 @@ def make_alert_row(
     )
 
 
+def make_utilisation_snapshot(
+    *,
+    score: float = 18.4,
+    band: str = "low",
+    abnormal_reason: str | None = None,
+    baseline_sample_size: int = 240,
+) -> UtilisationSnapshot:
+    return UtilisationSnapshot(
+        window_end=NOW.date(),
+        window_days=30,
+        score=score,
+        band=band,
+        active_day_component=0.20,
+        moving_hours_component=0.18,
+        distance_component=0.22,
+        idle_share=0.31,
+        abnormal_reason=abnormal_reason,
+        baseline_sample_size=baseline_sample_size,
+        formula_version="utilisation-v1",
+    )
+
+
 def make_vehicle_detail(
     *,
     vin: str = "ZZAAAAAAAAAAAAAAA",
@@ -204,6 +227,7 @@ def make_vehicle_detail(
     powertrain: str = "ICE",
     burns_fuel: bool = True,
     total_cost: Decimal | None = Decimal("1250.5000"),
+    utilisation: UtilisationSnapshot | None = None,
 ) -> VehicleDetail:
     return VehicleDetail(
         vin=vin,
@@ -220,6 +244,7 @@ def make_vehicle_detail(
         total_idle_hours=3.5,
         total_cost=total_cost,
         currency="INR" if total_cost is not None else None,
+        utilisation=utilisation,
     )
 
 

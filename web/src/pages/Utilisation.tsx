@@ -53,7 +53,11 @@ function ComponentBar({ value, label }: { value: number; label: string }): React
   );
 }
 
-export function Utilisation(): ReactNode {
+export function Utilisation({
+  onOpenVehicle,
+}: {
+  onOpenVehicle: (vin: string) => void;
+}): ReactNode {
   const [band, setBand] = useState<BandFilter>('all');
 
   const utilisation = useQuery({
@@ -105,7 +109,7 @@ export function Utilisation(): ReactNode {
         headers={HEADERS}
       >
         {items.map((row) => (
-          <UtilisationRow key={row.vin} row={row} />
+          <UtilisationRow key={row.vin} row={row} onOpenVehicle={onOpenVehicle} />
         ))}
       </DataTable>
 
@@ -142,12 +146,20 @@ export function Utilisation(): ReactNode {
   );
 }
 
-function UtilisationRow({ row }: { row: UtilisationEntry }): ReactNode {
+function UtilisationRow({
+  row,
+  onOpenVehicle,
+}: {
+  row: UtilisationEntry;
+  onOpenVehicle: (vin: string) => void;
+}): ReactNode {
   return (
     <>
       <tr>
         <td>
-          <code className="vin">{row.vin}</code>
+          <button type="button" className="link" onClick={() => onOpenVehicle(row.vin)}>
+            <code className="vin">{row.vin}</code>
+          </button>
           <span className="subtle"> {row.registration}</span>
         </td>
         <td>{row.vehicle_class.replace(/_/g, ' ')}</td>

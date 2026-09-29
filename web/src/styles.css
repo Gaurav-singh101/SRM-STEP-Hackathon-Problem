@@ -587,3 +587,26 @@ code {
   font-size: 11px;
   font-weight: 400;
 }
+
+/* --- inline links ---------------------------------------------------------- */
+
+/*
+ * A VIN that opens the Vehicle Detail view. A real <button> rather than a clickable
+ * cell, because keyboard and screen-reader users need an actual control - styled to look
+ * like a link, since that is what it behaves like.
+ */
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-2);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.link:hover {
+  color: var(--text);
+}

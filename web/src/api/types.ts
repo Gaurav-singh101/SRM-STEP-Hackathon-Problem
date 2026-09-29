@@ -116,6 +116,23 @@ export interface TrendResponse {
   is_estimate: boolean;
 }
 
+/** One vehicle's utilisation score from the latest window. */
+export interface VehicleUtilisation {
+  window_end: string;
+  window_days: number;
+  score: number;
+  band: string;
+  active_day_component: number;
+  moving_hours_component: number;
+  distance_component: number;
+  idle_share: number;
+  /** Plain-language explanation, present only for the `abnormal` band. */
+  abnormal_reason: string | null;
+  /** Peers the baseline was built from: a score from 5 is weaker than one from 500. */
+  baseline_sample_size: number;
+  formula_version: string;
+}
+
 export interface VehicleDetail {
   vin: string;
   registration: string;
@@ -132,6 +149,11 @@ export interface VehicleDetail {
   total_idle_hours: number;
   total_cost: string | null;
   currency: string | null;
+  /**
+   * `null` when the latest window did not score this vehicle. Never render it as a zero
+   * score: "we could not score it" and "it scored badly" lead to opposite actions.
+   */
+  utilisation: VehicleUtilisation | null;
 }
 
 /** RFC 7807 problem document (CLAUDE.md S10). */

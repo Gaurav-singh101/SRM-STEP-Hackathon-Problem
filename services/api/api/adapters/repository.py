@@ -111,6 +111,28 @@ class LeaderboardRow:
 
 
 @dataclass(frozen=True, slots=True)
+class UtilisationSnapshot:
+    """One vehicle's utilisation score from the latest window.
+
+    A cut-down view of ``UtilisationRow``: the detail page needs the score and the reason
+    behind it, not the fleet-ranking fields. Kept as its own type rather than reusing the
+    row so the vehicle endpoint does not grow a dependency on the leaderboard's shape.
+    """
+
+    window_end: date
+    window_days: int
+    score: float
+    band: str
+    active_day_component: float
+    moving_hours_component: float
+    distance_component: float
+    idle_share: float
+    abnormal_reason: str | None
+    baseline_sample_size: int
+    formula_version: str
+
+
+@dataclass(frozen=True, slots=True)
 class VehicleDetail:
     """Vehicle master data plus its idle totals."""
 
@@ -128,6 +150,9 @@ class VehicleDetail:
     total_idle_hours: float
     total_cost: Decimal | None
     currency: str | None
+    #: ``None`` when this vehicle has no score in the latest window. Not a zero score:
+    #: "we could not score it" and "it scored badly" lead to opposite actions.
+    utilisation: UtilisationSnapshot | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -602,10 +627,23 @@ class FleetRepository:
                        (SELECT coalesce(sum(i.duration_seconds), 0) / 3600.0
                           FROM idle_events i WHERE i.vin = v.vin),
                        (SELECT sum(i.cost_est) FROM idle_events i WHERE i.vin = v.vin),
-                       (SELECT max(i.currency) FROM idle_events i WHERE i.vin = v.vin)
+                       (SELECT max(i.currency) FROM idle_events i WHERE i.vin = v.vin),
+                       u.window_end, u.window_days, u.score, u.band,
+                       u.active_day_component, u.moving_hours_component,
+                       u.distance_component, u.idle_share, u.abnormal_reason,
+                       u.baseline_sample_size, u.formula_version
                 FROM vehicles v
                 JOIN fleets f ON f.fleet_id = v.fleet_id
                 JOIN powertrains p ON p.powertrain_code = v.powertrain_code
+                -- LEFT JOIN, and only the newest window: an unscored vehicle must still
+                -- return its master data and idle cost. Restricting the window inside the
+                -- join rather than in WHERE is what keeps that true - a WHERE clause on
+                -- u.window_end would turn this back into an inner join.
+                LEFT JOIN vehicle_utilisation u
+                       ON u.vin = v.vin
+                      AND u.tenant_id = v.tenant_id
+                      AND u.window_end = (SELECT max(window_end) FROM vehicle_utilisation
+                                           WHERE tenant_id = v.tenant_id)
                 WHERE v.vin = %(vin)s
                 """,
                 {"vin": vin},
@@ -630,7 +668,37 @@ class FleetRepository:
             idle_hours,
             total_cost,
             currency,
+            u_window_end,
+            u_window_days,
+            u_score,
+            u_band,
+            u_active,
+            u_moving,
+            u_distance,
+            u_idle_share,
+            u_abnormal_reason,
+            u_baseline_size,
+            u_formula_version,
         ) = row
+
+        # Built only when a score exists. A snapshot of zeros would be read as a score.
+        snapshot = (
+            UtilisationSnapshot(
+                window_end=u_window_end,
+                window_days=int(u_window_days),
+                score=float(u_score),
+                band=str(u_band),
+                active_day_component=float(u_active),
+                moving_hours_component=float(u_moving),
+                distance_component=float(u_distance),
+                idle_share=float(u_idle_share),
+                abnormal_reason=str(u_abnormal_reason) if u_abnormal_reason else None,
+                baseline_sample_size=int(u_baseline_size),
+                formula_version=str(u_formula_version),
+            )
+            if u_window_end is not None
+            else None
+        )
 
         return VehicleDetail(
             vin=str(found_vin).strip(),
@@ -647,6 +715,7 @@ class FleetRepository:
             total_idle_hours=float(idle_hours or 0.0),
             total_cost=Decimal(total_cost) if total_cost is not None else None,
             currency=str(currency) if currency else None,
+            utilisation=snapshot,
         )
 
     # ------------------------------------------------------------ utilisation
