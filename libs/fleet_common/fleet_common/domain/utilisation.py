@@ -40,6 +40,12 @@ DEFAULT_ABNORMAL_Z: Final[float] = 3.0
 DEFAULT_MAD_FLOOR_FRACTION: Final[float] = 0.10
 DEFAULT_MIN_BASELINE_SAMPLE: Final[int] = 5
 
+#: How far a vehicle's three components may disagree before it is called abnormal.
+#: Each component is normalised to 0-1, so this is the gap between the highest and the
+#: lowest. Measured against a real 200-vehicle fleet: 0.6 flags about 7%, the right
+#: order for an exception band, while 0.4 flags 25% and is no longer an exception.
+DEFAULT_MAX_COMPONENT_SPREAD: Final[float] = 0.6
+
 #: Scales MAD to be comparable with a standard deviation for normal data, so a
 #: threshold of 3 means roughly "3 sigma" and stays intuitive.
 _MAD_TO_SIGMA: Final[float] = 0.6745
@@ -49,9 +55,10 @@ class UtilisationBand(StrEnum):
     LOW = "low"
     NORMAL = "normal"
     HIGH = "high"
-    #: A statistical outlier on some component, e.g. high distance with almost no
-    #: active days. Usually a data-quality or misuse signal rather than genuinely
-    #: low utilisation, so it is reported separately and not lumped into LOW.
+    #: The vehicle's own signals contradict each other - out every day but barely
+    #: moving, or covering distance on almost no active days. A data-quality or misuse
+    #: signal rather than a level of utilisation, so it is reported separately and
+    #: never lumped into LOW.
     ABNORMAL = "abnormal"
 
 
@@ -64,7 +71,10 @@ class UtilisationConfig:
     weight_distance: float = DEFAULT_WEIGHT_DISTANCE
     low_threshold: float = DEFAULT_LOW_THRESHOLD
     normal_upper: float = DEFAULT_NORMAL_UPPER
+    #: Retained for reporting context only; it no longer decides the band. See the
+    #: comment in score_utilisation and the 2026-09-29 amendment to ADR-0003.
     abnormal_z: float = DEFAULT_ABNORMAL_Z
+    max_component_spread: float = DEFAULT_MAX_COMPONENT_SPREAD
     # Floors the MAD at a fraction of the class median. On a tightly clustered
     # class the raw MAD is tiny, so |z| > 3 fires on ordinary variation and the
     # ABNORMAL band fills with false positives. The floor refuses to claim more
@@ -82,6 +92,8 @@ class UtilisationConfig:
             raise ValueError("require 0 < low_threshold < normal_upper < 100")
         if self.abnormal_z <= 0:
             raise ValueError("abnormal_z must be positive")
+        if not 0.0 < self.max_component_spread <= 1.0:
+            raise ValueError("max_component_spread must be in (0.0, 1.0]")
         if not 0.0 <= self.mad_floor_fraction < 1.0:
             raise ValueError("mad_floor_fraction must be in [0.0, 1.0)")
         if self.min_baseline_sample < 1:
@@ -168,8 +180,12 @@ class UtilisationScore:
     idle_share: float
     formula_version: str
     window_days: int
-    #: Largest robust z-score across components; drives the ABNORMAL band.
+    #: Largest robust z-score across components, against the class baseline. Reported
+    #: as context; it does NOT decide the band - ``component_spread`` does.
     max_abs_z: float
+    #: Gap between this vehicle's highest and lowest component. Decides ABNORMAL,
+    #: because it measures the vehicle against itself rather than against its peers.
+    component_spread: float = 0.0
     abnormal_reason: str | None = None
 
 
@@ -248,6 +264,31 @@ def _ratio_to_baseline(value: float, baseline_median: float) -> float:
     return min(value / baseline_median, 1.0)
 
 
+def _describe_inconsistency(active: float, moving: float, distance: float) -> str:
+    """Say which signals disagree, in terms a fleet manager can act on.
+
+    A band with no explanation is a band nobody trusts, so the message names the
+    specific contradiction rather than quoting a statistic at someone.
+    """
+    if active > moving and active > distance:
+        return (
+            f"recorded active on {active:.0%} of days but reached only {moving:.0%} of "
+            "the expected moving time - in service daily yet barely used"
+        )
+    if distance > active:
+        return (
+            f"covered {distance:.0%} of the expected distance on only {active:.0%} of "
+            "days - long runs concentrated into very few days"
+        )
+    if moving > distance:
+        return (
+            f"moving for {moving:.0%} of the expected time but covering only "
+            f"{distance:.0%} of the expected distance - possible odometer fault or "
+            "prolonged low-speed work"
+        )
+    return f"components disagree: active {active:.0%}, moving {moving:.0%}, distance {distance:.0%}"
+
+
 def score_utilisation(
     activity: VehicleActivity,
     baseline: ClassBaseline,
@@ -306,13 +347,28 @@ def score_utilisation(
     worst_component, worst_z = max(z_scores.items(), key=lambda kv: abs(kv[1]))
     max_abs_z = abs(worst_z)
 
-    # With too few peers, MAD describes noise rather than spread, so we decline
-    # to call anything abnormal and band on the score alone.
-    baseline_is_usable = baseline.sample_size >= cfg.min_baseline_sample
+    # ABNORMAL measures the vehicle against ITSELF, not against its peers.
+    #
+    # Peer comparison was tried first and was wrong. MAD assumes a roughly unimodal
+    # distribution, and a fleet with distinct duty tiers is not: MAD then measures only
+    # the dominant tier's spread and flags every busy vehicle as an outlier. On a
+    # 200-vehicle fleet that put 21% of vehicles in the band, which makes it useless -
+    # a heavy-duty truck doing three times the class median is not anomalous, it is
+    # working. Raising the MAD floor did not fix it either; the rate fell from 28% to 0%
+    # between floors of 0.2 and 0.3, because the distribution is multi-modal and there
+    # is no threshold that separates "busy" from "broken".
+    #
+    # What is genuinely worth flagging is a vehicle whose own signals disagree: out
+    # every day but barely moving, or covering distance on almost no active days. That
+    # is what ADR-0003 always described, and measuring it within one vehicle is immune
+    # to the shape of the fleet's distribution.
+    del worst_component  # retained above only for the z-score context value
+    components = (active_component, moving_component, distance_component)
+    component_spread = max(components) - min(components)
 
-    if baseline_is_usable and max_abs_z > cfg.abnormal_z:
+    if component_spread > cfg.max_component_spread:
         band = UtilisationBand.ABNORMAL
-        reason = f"{worst_component} is {worst_z:+.1f} robust sigma from the class median"
+        reason = _describe_inconsistency(active_component, moving_component, distance_component)
     elif score < cfg.low_threshold:
         band = UtilisationBand.LOW
         reason = None
@@ -334,5 +390,6 @@ def score_utilisation(
         formula_version=UTILISATION_FORMULA_VERSION,
         window_days=activity.window_days,
         max_abs_z=max_abs_z,
+        component_spread=component_spread,
         abnormal_reason=reason,
     )

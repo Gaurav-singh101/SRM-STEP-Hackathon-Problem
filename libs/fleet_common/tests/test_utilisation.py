@@ -125,20 +125,40 @@ def test_mad_floor_prevents_a_false_outlier() -> None:
     assert score.max_abs_z == pytest.approx(1.635, abs=0.01)
 
 
-def test_mad_floor_can_be_disabled() -> None:
-    """Setting the fraction to 0 restores the raw, hypersensitive behaviour.
+def test_mad_floor_still_shapes_the_reported_z_score() -> None:
+    """The floor now affects the context figure only, not the band.
 
-    Kept configurable so the trade-off stays visible and tunable rather than
-    silently baked into the formula.
+    ``max_abs_z`` is still reported, because "how far from the class median" is useful
+    to a reader, but it no longer decides anything.
+    """
+    raw = UtilisationConfig(mad_floor_fraction=0.0)
+    floored = UtilisationConfig()
+    assert (
+        score_utilisation(UNREMARKABLE_VEHICLE, BASELINE, raw).max_abs_z
+        > score_utilisation(UNREMARKABLE_VEHICLE, BASELINE, floored).max_abs_z
+    )
+
+
+def test_a_high_z_score_alone_does_not_make_a_vehicle_abnormal() -> None:
+    """The regression this redesign exists to prevent.
+
+    Peer comparison put 21% of a real 200-vehicle fleet in the ABNORMAL band, because
+    MAD assumes a unimodal distribution and a fleet with distinct duty tiers is not. A
+    heavy-duty vehicle doing three times the class median is working, not broken.
     """
     raw = UtilisationConfig(mad_floor_fraction=0.0)
     score = score_utilisation(UNREMARKABLE_VEHICLE, BASELINE, raw)
-    assert score.max_abs_z == pytest.approx(3.597, abs=0.01)
-    assert score.band is UtilisationBand.ABNORMAL
+    assert score.max_abs_z > 3.0, "expected a high z against this tight baseline"
+    assert score.band is not UtilisationBand.ABNORMAL
 
 
-def test_small_baseline_never_asserts_abnormality() -> None:
-    """MAD from 3 peers is noise, so we decline to call anything abnormal."""
+def test_abnormality_does_not_depend_on_how_many_peers_there_are() -> None:
+    """A benefit of measuring the vehicle against itself.
+
+    The old peer-based test could say nothing with three peers, because MAD from three
+    samples is noise. An internally inconsistent vehicle is inconsistent however many
+    others exist, so the band works for a small fleet too.
+    """
     tiny = build_class_baseline("tiny", busy_fleet(3))
     weird = VehicleActivity(
         vin="WEIRD",
@@ -148,9 +168,64 @@ def test_small_baseline_never_asserts_abnormality() -> None:
         distance_km=50000.0,
         idle_hours=1.0,
     )
-    score = score_utilisation(weird, tiny)
     assert tiny.sample_size == 3
-    assert score.band is not UtilisationBand.ABNORMAL
+    assert score_utilisation(weird, tiny).band is UtilisationBand.ABNORMAL
+
+
+def test_a_busy_but_consistent_vehicle_is_high_not_abnormal() -> None:
+    """All three components agree and are high: a well-used asset, not an anomaly."""
+    busy = VehicleActivity(
+        vin="BUSY",
+        window_days=30,
+        active_days=30,
+        moving_hours=300.0,
+        distance_km=12000.0,
+        idle_hours=20.0,
+    )
+    score = score_utilisation(busy, BASELINE)
+    assert score.component_spread == pytest.approx(0.0, abs=0.01)
+    assert score.band is UtilisationBand.HIGH
+
+
+def test_active_every_day_but_barely_moving_is_abnormal() -> None:
+    """The pattern actually found in real data: nominally in service daily, doing
+    almost nothing. Either genuinely under-used despite appearing busy, or something
+    is wrong - and both are worth a look."""
+    inconsistent = VehicleActivity(
+        vin="PHANTOM",
+        window_days=30,
+        active_days=30,
+        moving_hours=40.0,
+        distance_km=1200.0,
+        idle_hours=5.0,
+    )
+    score = score_utilisation(inconsistent, BASELINE)
+    assert score.band is UtilisationBand.ABNORMAL
+    assert score.abnormal_reason is not None
+    assert "in service daily" in score.abnormal_reason
+
+
+def test_component_spread_threshold_is_configurable() -> None:
+    """The flagging rate was measured against a real fleet, not guessed, so the knob
+    stays visible rather than baked in."""
+    inconsistent = VehicleActivity(
+        vin="PHANTOM",
+        window_days=30,
+        active_days=30,
+        moving_hours=40.0,
+        distance_km=1200.0,
+        idle_hours=5.0,
+    )
+    permissive = UtilisationConfig(max_component_spread=0.95)
+    assert (
+        score_utilisation(inconsistent, BASELINE, permissive).band is not UtilisationBand.ABNORMAL
+    )
+
+
+@pytest.mark.parametrize("bad", [0.0, -0.1, 1.5])
+def test_invalid_component_spread_is_refused(bad: float) -> None:
+    with pytest.raises(ValueError, match="max_component_spread"):
+        UtilisationConfig(max_component_spread=bad)
 
 
 def test_score_is_bounded_to_0_100() -> None:
@@ -198,7 +273,10 @@ def test_abnormal_beats_low_and_explains_itself() -> None:
     score = score_utilisation(weird, BASELINE)
     assert score.band is UtilisationBand.ABNORMAL
     assert score.abnormal_reason is not None
-    assert "robust sigma" in score.abnormal_reason
+    # Names the contradiction rather than quoting a statistic: a band nobody
+    # understands is a band nobody acts on.
+    assert "distance" in score.abnormal_reason
+    assert "days" in score.abnormal_reason
 
 
 def test_ordinary_bands_carry_no_abnormal_reason() -> None:

@@ -22,7 +22,7 @@ import numpy as np
 
 from fleet_common.settings import kafka_settings, simulator_settings
 from simulator.fleet import build_fleet
-from simulator.journey import DaySummary, JourneyConfig, generate_day
+from simulator.journey import DaySummary, JourneyConfig, generate_history
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -139,12 +139,18 @@ def main(argv: list[str] | None = None) -> int:
     summaries: list[DaySummary] = []
 
     began = time.perf_counter()
-    for day_index in range(args.days):
-        day_start = start + timedelta(days=day_index)
-        for position, vehicle in enumerate(fleet, start=1):
-            events, summary = generate_day(vehicle, day_start, rng=rng, config=journey_config)
-            summaries.append(summary)
+    # Vehicles outer, days inner: a vehicle's whole history comes from one carried
+    # state, which is what keeps seq monotonic per VIN (ADR-0004) and the odometer
+    # non-decreasing. Looping days outer restarts both every day, and the consumer then
+    # correctly discards everything after day one as replayed data - a failure invisible
+    # from the producer side, since the broker accepts every event.
+    for position, vehicle in enumerate(fleet, start=1):
+        events, day_summaries = generate_history(
+            vehicle, start, days=args.days, rng=rng, config=journey_config
+        )
+        summaries.extend(day_summaries)
 
+        for summary in day_summaries:
             totals["events"] += summary.event_count
             totals["trips"] += summary.trips
             totals["idle"] += summary.idle_periods
@@ -155,17 +161,17 @@ def main(argv: list[str] | None = None) -> int:
             totals["malformed"] += summary.malformed_injected
             totals["dropped"] += summary.samples_dropped
 
-            if producer is not None:
-                for batch in _batched(events, args.batch_size):
-                    producer.produce_batch(batch)
+        if producer is not None:
+            for batch in _batched(events, args.batch_size):
+                producer.produce_batch(batch)
 
-            if position % args.progress_every == 0:
-                elapsed = time.perf_counter() - began
-                rate = totals["events"] / elapsed if elapsed else 0.0
-                print(
-                    f"  {position:,}/{len(fleet):,} vehicles  "
-                    f"{totals['events']:,} events  {rate:,.0f} ev/s"
-                )
+        if position % args.progress_every == 0:
+            elapsed = time.perf_counter() - began
+            rate = totals["events"] / elapsed if elapsed else 0.0
+            print(
+                f"  {position:,}/{len(fleet):,} vehicles  "
+                f"{totals['events']:,} events  {rate:,.0f} ev/s"
+            )
 
     if producer is not None:
         unacked = producer.flush()

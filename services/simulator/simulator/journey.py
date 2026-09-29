@@ -179,22 +179,14 @@ def _idle_plan(
     return max(seconds, config.sample_seconds), True
 
 
-def generate_day(
-    vehicle: SyntheticVehicle,
-    day_start: datetime,
-    *,
-    rng: np.random.Generator,
-    config: JourneyConfig | None = None,
-) -> tuple[list[dict[str, Any]], DaySummary]:
-    """Generate one working day of telemetry for one vehicle.
+def new_vehicle_state(vehicle: SyntheticVehicle, rng: np.random.Generator) -> _VehicleState:
+    """Initial per-vehicle cursor: odometer, engine hours, fuel level and sequence.
 
-    Returns the events in emission order (which is deliberately *not* always event
-    time order) together with a ground-truth summary.
-
-    Complexity: O(k) in the number of samples produced.
+    Created once per vehicle and then carried across days. A fresh state per day would
+    restart ``seq`` at zero, which violates the monotonic-per-VIN contract in ADR-0004,
+    and would let the odometer jump backwards between days.
     """
-    cfg = config or JourneyConfig()
-    state = _VehicleState(
+    return _VehicleState(
         odometer_km=float(rng.integers(5_000, 250_000)),
         engine_hours=float(rng.integers(200, 12_000)),
         fuel_level_pct=float(rng.integers(20, 95)),
@@ -202,6 +194,29 @@ def generate_day(
         lon=vehicle.depot_lon,
         idle_burn_rate_lph=_configured_idle_rate(vehicle),
     )
+
+
+def generate_day(
+    vehicle: SyntheticVehicle,
+    day_start: datetime,
+    *,
+    rng: np.random.Generator,
+    config: JourneyConfig | None = None,
+    state: _VehicleState | None = None,
+) -> tuple[list[dict[str, Any]], DaySummary]:
+    """Generate one working day of telemetry for one vehicle.
+
+    Returns the events in emission order (which is deliberately *not* always event time
+    order) together with a ground-truth summary.
+
+    ``state`` carries the vehicle's cursor across days. Passing it is what keeps ``seq``
+    monotonic per VIN and the odometer non-decreasing; omitting it starts a fresh
+    vehicle, which is what a single-day caller wants.
+
+    Complexity: O(k) in the number of samples produced.
+    """
+    cfg = config or JourneyConfig()
+    state = state if state is not None else new_vehicle_state(vehicle, rng)
 
     low, high = TRIPS_PER_DAY[vehicle.duty_cycle]
     trips = int(rng.integers(low, high + 1))
@@ -250,6 +265,40 @@ def generate_day(
         malformed_injected=state.malformed,
         samples_dropped=state.dropped,
     )
+
+
+def generate_history(
+    vehicle: SyntheticVehicle,
+    first_day_start: datetime,
+    *,
+    days: int,
+    rng: np.random.Generator,
+    config: JourneyConfig | None = None,
+) -> tuple[list[dict[str, Any]], list[DaySummary]]:
+    """Generate consecutive days for one vehicle, carrying its state across them.
+
+    The reason this exists rather than leaving callers to loop: generating each day
+    independently restarts ``seq`` at zero, and the dedup layer then correctly treats
+    every day after the first as replayed data and discards it. That failure is silent
+    from the producer's side - the events are accepted by the broker, and only the
+    consumer's idle-event count reveals it.
+    """
+    state = new_vehicle_state(vehicle, rng)
+    events: list[dict[str, Any]] = []
+    summaries: list[DaySummary] = []
+
+    for offset in range(days):
+        day_events, summary = generate_day(
+            vehicle,
+            first_day_start + timedelta(days=offset),
+            rng=rng,
+            config=config,
+            state=state,
+        )
+        events.extend(day_events)
+        summaries.append(summary)
+
+    return events, summaries
 
 
 def _emit_drive(

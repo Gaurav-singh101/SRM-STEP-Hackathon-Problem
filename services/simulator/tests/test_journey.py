@@ -422,3 +422,87 @@ def test_property_detected_idle_never_exceeds_the_observed_span(seed: int) -> No
     span = (parsed[-1].ts - parsed[0].ts).total_seconds()
     total_idle = sum(s.duration_seconds for s in segment_idle(parsed, IDLE_CONFIG))
     assert total_idle <= span + 1e-6
+
+
+# --------------------------------------------------------------------------
+# Multi-day history: the contract the dedup layer depends on
+# --------------------------------------------------------------------------
+
+
+def test_sequence_numbers_stay_monotonic_across_days() -> None:
+    """ADR-0004 requires seq to be monotonic *per VIN*, not per day.
+
+    Generating each day from a fresh state restarted seq at zero, so the processor's
+    replay window correctly classified every day after the first as redelivered data and
+    discarded it. The failure was invisible from the producer's side - the broker
+    accepted every event - and only showed up as a collapsing idle-event count: 271 on
+    day one, then 59, 27, 10.
+    """
+    from simulator.journey import generate_history
+
+    vehicle = build_fleet(vehicle_count=1, seed=51)[0]
+    events, summaries = generate_history(
+        vehicle,
+        DAY_START,
+        days=5,
+        rng=np.random.default_rng(51),
+        config=CLEAN,
+    )
+
+    assert len(summaries) == 5
+    seqs = [e["seq"] for e in events]
+    assert seqs == sorted(seqs), "sequence numbers are not monotonic across days"
+    assert len(set(seqs)) == len(seqs), "a sequence number was reused across days"
+
+
+def test_odometer_never_decreases_across_days() -> None:
+    """A vehicle's odometer cannot go backwards overnight. Per-day state reset it to a
+    fresh random value, which would also make daily distance meaningless."""
+    from simulator.journey import generate_history
+
+    vehicle = build_fleet(vehicle_count=1, seed=52)[0]
+    events, _ = generate_history(
+        vehicle, DAY_START, days=5, rng=np.random.default_rng(52), config=CLEAN
+    )
+    readings = [e["odometer_km"] for e in events]
+    assert readings == sorted(readings)
+
+
+def test_history_covers_every_requested_day() -> None:
+    from simulator.journey import generate_history
+
+    vehicle = build_fleet(vehicle_count=1, seed=53)[0]
+    events, summaries = generate_history(
+        vehicle, DAY_START, days=7, rng=np.random.default_rng(53), config=CLEAN
+    )
+    assert len(summaries) == 7
+    days = {e["ts"][:10] for e in events}
+    # Trips can run past midnight, so a day may contribute samples to the next date.
+    assert len(days) >= 7
+
+
+def test_a_multi_day_stream_survives_the_dedup_layer() -> None:
+    """The end-to-end guard: feed a real multi-day stream through dedup and check that
+    later days are not discarded as replays."""
+    from fleet_common.events import TelemetryEvent
+    from processor.dedup import DedupConfig, DedupState, EventDisposition
+    from simulator.journey import generate_history
+
+    vehicle = build_fleet(vehicle_count=1, seed=54)[0]
+    events, _ = generate_history(
+        vehicle, DAY_START, days=5, rng=np.random.default_rng(54), config=CLEAN
+    )
+
+    state = DedupState()
+    config = DedupConfig()
+    accepted = sum(
+        1
+        for raw in events
+        if state.classify(TelemetryEvent.model_validate(raw), config).disposition
+        is EventDisposition.ACCEPT
+    )
+    # Everything should be accepted: a clean stream has no duplicates or reordering.
+    assert accepted == len(events), (
+        f"only {accepted} of {len(events)} events survived dedup; sequence numbers are "
+        "probably restarting per day"
+    )
