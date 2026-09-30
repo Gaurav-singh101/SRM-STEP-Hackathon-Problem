@@ -222,7 +222,18 @@ def seed_drivers(
             tenant_vehicles = [v for v in vehicles if v.tenant_id == tenant_id]
             driver_count = max(1, min(len(tenant_vehicles), per_fleet * FLEETS_PER_TENANT))
 
-            with cur.copy("COPY drivers (tenant_id, full_name, licence_ref) FROM STDIN") as copy:
+            # Same TEMP-table upsert as vehicles, and for the same reason: licence_ref is
+            # derived from the driver index, so a re-run regenerates identical references and
+            # a bare COPY dies on drivers_licence_unique_per_tenant. Fixing only `vehicles`
+            # moved the failure one table along - the whole seed has to be re-runnable, not
+            # just its first step.
+            cur.execute(
+                "CREATE TEMP TABLE drivers_incoming"
+                " (LIKE drivers INCLUDING DEFAULTS) ON COMMIT DROP"
+            )
+            with cur.copy(
+                "COPY drivers_incoming (tenant_id, full_name, licence_ref) FROM STDIN"
+            ) as copy:
                 for index in range(driver_count):
                     copy.write_row(
                         (
@@ -231,7 +242,13 @@ def seed_drivers(
                             f"LIC-{tenant_id[-6:]}-{index:05d}",
                         )
                     )
-            written += driver_count
+            cur.execute(
+                "INSERT INTO drivers (tenant_id, full_name, licence_ref)"
+                " SELECT tenant_id, full_name, licence_ref FROM drivers_incoming"
+                " ON CONFLICT (tenant_id, licence_ref) DO NOTHING"
+            )
+            written += max(cur.rowcount, 0)
+            cur.execute("DROP TABLE IF EXISTS drivers_incoming")
 
             cur.execute(
                 "SELECT driver_id FROM drivers WHERE tenant_id = %s ORDER BY driver_id",
@@ -240,8 +257,12 @@ def seed_drivers(
             driver_ids = [int(r[0]) for r in cur.fetchall()]
             assigned_from = datetime.now(UTC) - timedelta(days=90)
 
+            cur.execute(
+                "CREATE TEMP TABLE assignments_incoming"
+                " (LIKE vehicle_assignments INCLUDING DEFAULTS) ON COMMIT DROP"
+            )
             with cur.copy(
-                "COPY vehicle_assignments (tenant_id, vin, driver_id, assigned_from) FROM STDIN"
+                "COPY assignments_incoming (tenant_id, vin, driver_id, assigned_from) FROM STDIN"
             ) as copy:
                 for position, vehicle in enumerate(tenant_vehicles):
                     copy.write_row(
@@ -252,6 +273,17 @@ def seed_drivers(
                             assigned_from,
                         )
                     )
+            # The conflict target repeats the index predicate, because
+            # vehicle_assignments_one_open_per_vin is a PARTIAL unique index on
+            # (vin) WHERE assigned_to IS NULL. Omitting the WHERE makes PostgreSQL refuse
+            # the statement with "no unique or exclusion constraint matching the ON CONFLICT
+            # specification" - a trap this project has already hit once elsewhere.
+            cur.execute(
+                "INSERT INTO vehicle_assignments (tenant_id, vin, driver_id, assigned_from)"
+                " SELECT tenant_id, vin, driver_id, assigned_from FROM assignments_incoming"
+                " ON CONFLICT (vin) WHERE assigned_to IS NULL DO NOTHING"
+            )
+            cur.execute("DROP TABLE IF EXISTS assignments_incoming")
     return written
 
 
@@ -297,12 +329,40 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  tenants: {len(DEMO_TENANTS)}  fleets: {len(fleet_ids)}")
 
             written = seed_vehicles(conn, vehicles, fleet_ids)
-            print(f"  vehicles: {written:,}")
-
             drivers = seed_drivers(conn, vehicles, args.drivers_per_fleet)
-            print(f"  drivers: {drivers:,} (assigned to every vehicle)")
-
             conn.commit()
+
+            # Inserted-this-run AND the resulting total, because the two diverge on a
+            # re-run and only one of them answers "is the dataset there?". An earlier
+            # version printed "drivers: 2 (assigned to every vehicle)" after a scale-up,
+            # which is a true rowcount that reads as though the fleet had two drivers.
+            with conn.cursor() as cur:
+                # SET ROLE, because these counts deliberately cross tenants and RLS is
+                # FORCEd - which binds the table owner too, so without this the "total"
+                # would silently be whichever tenant's context happened to be left set.
+                cur.execute("SET ROLE fleet_batch")
+                cur.execute("SELECT count(*) FROM vehicles")
+                row = cur.fetchone()
+                total_vehicles = int(row[0]) if row else 0
+                cur.execute("SELECT count(*) FROM drivers")
+                row = cur.fetchone()
+                total_drivers = int(row[0]) if row else 0
+                cur.execute(
+                    "SELECT count(*) FROM vehicles v WHERE NOT EXISTS ("
+                    " SELECT 1 FROM vehicle_assignments a"
+                    " WHERE a.vin = v.vin AND a.assigned_to IS NULL)"
+                )
+                row = cur.fetchone()
+                unassigned = int(row[0]) if row else 0
+
+            print(f"  vehicles: +{written:,} this run, {total_vehicles:,} total")
+            print(f"  drivers:  +{drivers:,} this run, {total_drivers:,} total")
+            if unassigned:
+                # Stated rather than assumed: a vehicle with no driver has no erasure
+                # subject, and the right-to-erasure flow silently covers less than it looks.
+                print(f"  WARNING: {unassigned:,} vehicle(s) have no open driver assignment")
+            else:
+                print(f"  every one of {total_vehicles:,} vehicles has an open assignment")
     except psycopg.Error as exc:
         # Never echo the DSN: it carries the password.
         print(f"seed failed: {exc}", file=sys.stderr)

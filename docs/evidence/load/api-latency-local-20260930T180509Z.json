@@ -1,0 +1,136 @@
+{
+  "date_utc": "2026-09-30T18:05:09.699508+00:00",
+  "commit": "88bbb8c",
+  "label": "local",
+  "scenario": {
+    "requests_per_endpoint": 200,
+    "concurrency": 6,
+    "warmup_discarded": 10,
+    "base_url": "http://127.0.0.1:8000",
+    "role": "finance_manager"
+  },
+  "targets": {
+    "p95_ms": 200.0,
+    "p99_ms": 500.0
+  },
+  "endpoints": [
+    {
+      "endpoint": "healthz",
+      "requests": 200,
+      "statuses": {
+        "200": 200
+      },
+      "p50_ms": 21.9,
+      "p95_ms": 45.9,
+      "p99_ms": 56.3,
+      "min_ms": 5.7,
+      "max_ms": 62.8,
+      "p95_within_target": true,
+      "p99_within_target": true,
+      "errors": []
+    },
+    {
+      "endpoint": "fleet_summary",
+      "requests": 200,
+      "statuses": {
+        "200": 200
+      },
+      "p50_ms": 104.6,
+      "p95_ms": 167.2,
+      "p99_ms": 188.0,
+      "min_ms": 57.4,
+      "max_ms": 189.1,
+      "p95_within_target": true,
+      "p99_within_target": true,
+      "errors": []
+    },
+    {
+      "endpoint": "fleet_trend",
+      "requests": 200,
+      "statuses": {
+        "200": 200
+      },
+      "p50_ms": 68.2,
+      "p95_ms": 124.6,
+      "p99_ms": 165.4,
+      "min_ms": 36.2,
+      "max_ms": 197.7,
+      "p95_within_target": true,
+      "p99_within_target": true,
+      "errors": []
+    },
+    {
+      "endpoint": "idle_events_page",
+      "requests": 200,
+      "statuses": {
+        "200": 200
+      },
+      "p50_ms": 80.2,
+      "p95_ms": 107.1,
+      "p99_ms": 276.5,
+      "min_ms": 44.3,
+      "max_ms": 276.9,
+      "p95_within_target": true,
+      "p99_within_target": true,
+      "errors": []
+    },
+    {
+      "endpoint": "leaderboard",
+      "requests": 200,
+      "statuses": {
+        "200": 200
+      },
+      "p50_ms": 52.9,
+      "p95_ms": 76.2,
+      "p99_ms": 92.9,
+      "min_ms": 32.1,
+      "max_ms": 96.4,
+      "p95_within_target": true,
+      "p99_within_target": true,
+      "errors": []
+    },
+    {
+      "endpoint": "utilisation",
+      "requests": 200,
+      "statuses": {
+        "200": 200
+      },
+      "p50_ms": 64.2,
+      "p95_ms": 87.8,
+      "p99_ms": 95.7,
+      "min_ms": 33.1,
+      "max_ms": 99.4,
+      "p95_within_target": true,
+      "p99_within_target": true,
+      "errors": []
+    },
+    {
+      "endpoint": "alerts",
+      "requests": 200,
+      "statuses": {
+        "200": 200
+      },
+      "p50_ms": 50.0,
+      "p95_ms": 67.3,
+      "p99_ms": 76.0,
+      "min_ms": 25.6,
+      "max_ms": 80.5,
+      "p95_within_target": true,
+      "p99_within_target": true,
+      "errors": []
+    }
+  ],
+  "verdict": {
+    "endpoints_fully_200": [
+      "fleet_summary",
+      "fleet_trend",
+      "idle_events_page",
+      "leaderboard",
+      "utilisation",
+      "alerts"
+    ],
+    "endpoints_breaching_target": [],
+    "all_within_target": true
+  },
+  "caveat": "LOCAL, single-client measurement against one API process on a developer laptop. This measures HTTP latency under light concurrency, NOT latency at capacity, and is not a substitute for a distributed load test at the 100K events/s target. It does however include what the earlier SQL-only figures excluded: JWKS signature verification, the Redis rate-limit check, serialisation and the audit-log insert."
+}

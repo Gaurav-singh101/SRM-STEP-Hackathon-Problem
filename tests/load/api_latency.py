@@ -51,6 +51,19 @@ ENDPOINTS = (
 TARGET_P95_MS = 200.0
 TARGET_P99_MS = 500.0
 
+#: Above this, /healthz latency is the harness's own overhead rather than the API's.
+#:
+#: /healthz touches no database and does no auth, so whatever it costs is the floor under
+#: every other number here. This guard exists because the first working run reported ~2,050
+#: ms on EVERY endpoint including healthz, with a 30 ms spread - and the cause was entirely
+#: client-side: `localhost` resolves to ::1 first on this machine, the API binds IPv4 only,
+#: and the failed IPv6 attempt cost ~2 seconds per request. Measured against 127.0.0.1 the
+#: same endpoint answers in 16 ms, a 131x difference that had nothing to do with the API.
+#:
+#: A floor that uniform is the signature of measuring the instrument, so the harness now
+#: checks for it instead of publishing it.
+HEALTHZ_OVERHEAD_CEILING_MS = 50.0
+
 
 @dataclass(slots=True)
 class Sample:
@@ -158,8 +171,8 @@ def _commit() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="api_latency", description=__doc__)
-    parser.add_argument("--base-url", default="http://localhost:8000")
-    parser.add_argument("--oidc-url", default="http://localhost:8081")
+    parser.add_argument("--base-url", default="http://127.0.0.1:8000")
+    parser.add_argument("--oidc-url", default="http://127.0.0.1:8081")
     parser.add_argument("--tenant", default="tenant-demo")
     parser.add_argument("--role", default="finance_manager")
     parser.add_argument("--requests", type=int, default=400)
@@ -190,6 +203,40 @@ def main(argv: list[str] | None = None) -> int:
                 warmup=args.warmup,
             )
         )
+
+    # Self-check first: if the no-op endpoint is slow, every other number is the harness.
+    healthz = next((r for r in results if r.name == "healthz"), None)
+    if healthz and healthz.samples_ms:
+        floor = statistics.median(healthz.samples_ms)
+        if floor > HEALTHZ_OVERHEAD_CEILING_MS:
+            print(
+                f"ABORTING: /healthz median is {floor:.0f} ms, above the "
+                f"{HEALTHZ_OVERHEAD_CEILING_MS:.0f} ms ceiling. That endpoint does no work, so "
+                "this is the harness's own overhead and every other figure in this run is "
+                "measuring the instrument rather than the API. Most likely cause: a hostname "
+                "resolving to IPv6 first while the API binds IPv4 only - use 127.0.0.1 rather "
+                "than localhost. No evidence file written.",
+                file=sys.stderr,
+            )
+            return 2
+
+    # A rate-limited measurement is not a latency measurement. 429s are fast, so they drag
+    # the percentiles DOWN and would manufacture a pass - the most dangerous direction to be
+    # wrong in. API_RATE_LIMIT_PER_MINUTE defaults to 600 and this harness fires several
+    # thousand requests, so hitting it is the expected case rather than an edge one.
+    throttled = {r.name: r.statuses.get(429, 0) for r in results if r.statuses.get(429)}
+    if throttled:
+        total_429 = sum(throttled.values())
+        print(
+            f"ABORTING: {total_429} request(s) were rate-limited (HTTP 429). "
+            "429s return fast and would pull the percentiles down, turning a breach into "
+            "a pass. Raise API_RATE_LIMIT_PER_MINUTE for the measurement and re-run, or "
+            "lower --requests. No evidence file written.",
+            file=sys.stderr,
+        )
+        for name, count in throttled.items():
+            print(f"  {name}: {count} throttled", file=sys.stderr)
+        return 2
 
     # Only endpoints that actually answered count towards the verdict. A 401 or a 500 is
     # fast, and letting those inflate a pass would be worse than a miss.

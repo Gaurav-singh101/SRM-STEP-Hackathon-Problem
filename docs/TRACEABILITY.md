@@ -83,6 +83,7 @@ section. `Dn` = open decision.
 | PDF-13 | Solution Document, 17 sections | `docs/solution-document/SOLUTION.md` | unmet NFRs stated as unmet | Done |
 | PDF-12 | Load scenario with a scaling ladder | `tests/load/run_scenario.py` | `docs/evidence/load/` - labelled LOCAL | Done |
 | PDF-12 | Chaos: kill infra, prove recovery AND no loss | `tests/chaos/run.py` | fails on a shortfall, not just on non-recovery | Done |
+| PDF-13 | Seeded 100K-vehicle dataset | `batch.seed`, idempotent | **100,000 vehicles**, every one with an open assignment; `+0` on re-run | Done |
 | PDF-16 | Algorithms + complexity write-up | SOLUTION.md S6.5 | with before/after query plans | Done |
 | D6 | Late-event reconciliation | `batch/reconcile.py`, `reconcile-late` | ADR-0007, 43 batch tests | Done |
 | PDF-13 | Demo video (5 min) | - | **NOT PRODUCED** - stated in SOLUTION.md S13 | **Open** |
@@ -93,7 +94,7 @@ section. `Dn` = open decision.
 | PDF-16, CM-9 | SQL before/after query plans with EXPLAIN (ANALYZE, BUFFERS) | `tests/tools/sql_plans.py` | `docs/evidence/sql/query-plans.md` | Done |
 | CM-9 | Leaderboard reads the daily rollup, not raw events | `repository.py::idle_cost_leaderboard` | ~3x faster, non-overlapping ranges over two nine-sample runs; scales with vehicle-days not events | Done |
 | CM-9 | Leaderboard **SQL** under 200 ms | rollup read path | **91 ms (89-117)** at 2M events, LOCAL laptop. A query time, not an HTTP latency | Met locally |
-| PDF-11 | API p95 < 200 ms, p99 < 500 ms **over HTTP** | - | **NOT MEASURED.** Query timings do not include auth, rate-limit, serialisation or the audit insert. No p99 at any layer | **Open** |
+| PDF-11 | API p95 < 200 ms, p99 < 500 ms **over HTTP** | `tests/load/api_latency.py` | **MET.** Worst p95 167 ms, worst p99 277 ms, at 100K vehicles, all 200s. `docs/evidence/load/api-latency-local-*.json` | Done |
 | D9 | Partial totals declared, BEVs never zeroed | `schemas.py`, `PartialTotalNotice` | `test_summary_flags_a_partial_cost_total` | Done |
 | CM-14 | Fleet Overview view | `web/src/pages/FleetOverview.tsx` | - | Done |
 | CM-14 | Idle Cost Leaderboard view | `web/src/pages/IdleLeaderboard.tsx` | - | Done |
