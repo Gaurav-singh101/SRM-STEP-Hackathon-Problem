@@ -84,9 +84,9 @@ resource "aws_db_instance" "postgres" {
   # `make cloud-down` stops working and the bill does not stop.
   skip_final_snapshot = var.environment != "prod"
 
-  performance_insights_enabled     = true
-  enabled_cloudwatch_logs_exports  = ["postgresql"]
-  auto_minor_version_upgrade       = true
+  performance_insights_enabled    = true
+  enabled_cloudwatch_logs_exports = ["postgresql"]
+  auto_minor_version_upgrade      = true
 
   tags = { Name = "${local.name}-postgres" }
 }

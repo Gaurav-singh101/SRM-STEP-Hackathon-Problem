@@ -126,6 +126,12 @@ serviceAccount:
   name: ""
 
 networkPolicy:
+  # The managed data stores live outside the cluster, so egress to them is CIDR-scoped.
+  # Narrowed to the VPC - never 0.0.0.0/0, which would make the policy decorative.
+  dataStoreCidr: 10.0.0.0/8
+  # Namespace running the ingress controller, allowed to reach the API. Empty means no
+  # external ingress rule is rendered at all.
+  ingressNamespace: ""
   # Off by default because it needs a CNI that enforces it, and a policy that is silently
   # ignored is worse than none - it reads as protection that is not there.
   enabled: false

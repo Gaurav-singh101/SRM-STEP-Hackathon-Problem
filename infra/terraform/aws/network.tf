@@ -6,7 +6,7 @@ data "aws_availability_zones" "available" {
 }
 
 locals {
-  azs = slice(data.aws_availability_zones.available.names, 0, var.availability_zone_count)
+  azs  = slice(data.aws_availability_zones.available.names, 0, var.availability_zone_count)
   name = "fleet-${var.environment}"
 }
 

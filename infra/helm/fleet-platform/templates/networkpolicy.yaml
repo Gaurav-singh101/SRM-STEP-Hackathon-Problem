@@ -1,0 +1,130 @@
+{{/*
+Network policies: default-deny, then the minimum each component actually needs.
+
+Off by default, because a policy is only enforced when the CNI implements it. Docker
+Desktop's default CNI does not, so enabling it there would render objects that look like
+protection and enforce nothing - which is worse than leaving it off, because a reader would
+believe the cluster was segmented.
+
+It IS enabled in values-aws.yaml, where the EKS VPC CNI enforces it.
+
+This file exists because `networkPolicy.enabled` was a value with no template behind it.
+The chart rendered identically with the flag on and off, which is exactly the
+"protection that is not there" the values comment warns about. Caught by comparing rendered
+output line counts between the two value sets.
+*/}}
+{{- if .Values.networkPolicy.enabled }}
+# Deny everything not explicitly allowed below. Without this baseline the rules that follow
+# are additive to an open default and buy nothing.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "fleet.fullname" . }}-default-deny
+  labels:
+    {{- include "fleet.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# The API accepts traffic from the web tier only, and reaches the data stores plus DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "fleet.fullname" . }}-api
+  labels:
+    {{- include "fleet.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: web
+        # An ingress controller is not in this release, so it is selected by namespace
+        # rather than by pod label.
+        {{- with .Values.networkPolicy.ingressNamespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.port }}
+  egress:
+    # DNS first: without it every other rule fails on name resolution rather than on
+    # connectivity, which is a confusing way to debug a policy.
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # The managed data stores sit outside the cluster, so they are CIDR-scoped rather than
+    # pod-scoped. Narrowed to the VPC, never 0.0.0.0/0.
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.dataStoreCidr }}
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 27017
+---
+# The processor takes no ingress at all: it is a consumer loop, and nothing should be able
+# to connect to it. Egress to Kafka and the stores only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "fleet.fullname" . }}-processor
+  labels:
+    {{- include "fleet.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: processor
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.dataStoreCidr }}
+      ports:
+        - protocol: TCP
+          port: 9092
+        - protocol: TCP
+          port: 9094
+        - protocol: TCP
+          port: 9096
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 27017
+{{- end }}
