@@ -1,0 +1,65 @@
+{
+  "date_utc": "2026-09-30T17:33:05.254527+00:00",
+  "results": [
+    {
+      "scenario": "kill-kafka",
+      "target": "kafka",
+      "killed_at": "2026-09-30T17:28:20.408185+00:00",
+      "recovered_after_seconds": 54.5,
+      "events_before": 3977900,
+      "events_after": 4030129,
+      "events_produced": 54113,
+      "events_consumed": 54113,
+      "events_accepted": 52229,
+      "delta": 52229,
+      "nothing_stranded": true,
+      "accepted_all_persisted": true,
+      "accounted_for": true,
+      "passed": true,
+      "notes": [
+        "processor consumed 54113 message(s) and accepted 52229 after recovery",
+        "Accounted for: 54113 consumed >= 54113 produced, and the store gained 52229 >= 52229 accepted. The difference between produced and accepted is the validator rejecting invalid events to the DLQ, routing late ones to the late topic and dropping duplicates - all accounted for, none lost."
+      ]
+    },
+    {
+      "scenario": "kill-postgres",
+      "target": "postgres",
+      "killed_at": "2026-09-30T17:30:44.184921+00:00",
+      "recovered_after_seconds": 7.5,
+      "events_before": 4030129,
+      "events_after": 4082358,
+      "events_produced": 54113,
+      "events_consumed": 54113,
+      "events_accepted": 52229,
+      "delta": 52229,
+      "nothing_stranded": true,
+      "accepted_all_persisted": true,
+      "accounted_for": true,
+      "passed": true,
+      "notes": [
+        "processor consumed 54113 message(s) and accepted 52229 after recovery",
+        "Accounted for: 54113 consumed >= 54113 produced, and the store gained 52229 >= 52229 accepted. The difference between produced and accepted is the validator rejecting invalid events to the DLQ, routing late ones to the late topic and dropping duplicates - all accounted for, none lost."
+      ]
+    },
+    {
+      "scenario": "kill-redis",
+      "target": "redis",
+      "killed_at": "2026-09-30T17:31:52.311997+00:00",
+      "recovered_after_seconds": 7.3,
+      "events_before": 4082358,
+      "events_after": 4134587,
+      "events_produced": 54113,
+      "events_consumed": 54113,
+      "events_accepted": 52229,
+      "delta": 52229,
+      "nothing_stranded": true,
+      "accepted_all_persisted": true,
+      "accounted_for": true,
+      "passed": true,
+      "notes": [
+        "processor consumed 54113 message(s) and accepted 52229 after recovery",
+        "Accounted for: 54113 consumed >= 54113 produced, and the store gained 52229 >= 52229 accepted. The difference between produced and accepted is the validator rejecting invalid events to the DLQ, routing late ones to the late topic and dropping duplicates - all accounted for, none lost."
+      ]
+    }
+  ]
+}

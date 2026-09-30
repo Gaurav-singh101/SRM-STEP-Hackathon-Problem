@@ -14,6 +14,12 @@ intact", and it is the claim CLAUDE.md §3 forbids making without a test behind 
 Each scenario therefore: takes a baseline count, produces a known number of events, kills
 something mid-flight, waits for recovery, and reconciles the counts. A scenario that cannot
 reconcile its counts **fails** rather than reporting a successful restart.
+
+**RUN THIS EXCLUSIVELY.** It SIGKILLs Kafka, PostgreSQL and Redis in turn, so anything else
+using the stack will fail in a way that looks like that other thing's bug. It cost me a run
+to learn: a 100,000-vehicle seed was executing at the same time and died with "server closed
+the connection unexpectedly", which reads as a seed defect and was this script killing the
+database underneath it. ``--require-idle`` refuses to start if the stack looks busy.
 """
 
 from __future__ import annotations
@@ -25,7 +31,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 logger = logging.getLogger("chaos")
@@ -41,6 +47,21 @@ REDIS = "redis"
 #: question is whether it recovers at all, not whether it is quick.
 RECOVERY_TIMEOUT_SECONDS = 180
 
+#: The processor image and the compose network it joins.
+#:
+#: The scenario has to run a consumer itself. Without one, events produced after the kill sit
+#: on the topic, MongoDB gains nothing, and the shortfall check reports "data loss" when the
+#: truth is "nobody was reading". The first working version of this script did exactly that
+#: and declared 65,753 events lost. A test that false-alarms on loss gets ignored, and then it
+#: is not believed on the run where loss is real - so the consumer is part of the scenario now,
+#: not an assumption about the environment.
+PROCESSOR_IMAGE = "fleet/processor:dev"
+COMPOSE_NETWORK = "fleet-intel_default"
+
+#: Seconds of empty polls before the processor exits. It has to outlast a rebalance after the
+#: broker restart, or the drain stops before the backlog is consumed.
+PROCESSOR_IDLE_EXIT_SECONDS = 20
+
 
 @dataclass(slots=True)
 class ScenarioResult:
@@ -51,17 +72,41 @@ class ScenarioResult:
     events_before: int = 0
     events_after: int = 0
     events_produced: int = 0
+    #: What the processor itself reported. Parsed from its run summary because the processor
+    #: is the only component that knows WHY an event did not reach a store.
+    events_consumed: int = 0
+    events_accepted: int = 0
     notes: list[str] = field(default_factory=list)
     passed: bool = False
 
     @property
-    def accounted_for(self) -> bool:
-        """Whether the store gained at least what was produced.
+    def nothing_stranded(self) -> bool:
+        """Every produced event reached a consumer.
 
-        At least, not exactly: delivery is at-least-once, so a redelivered batch is correct
-        behaviour. What must never happen is a shortfall - that is loss.
+        The first half of "no loss": an event still sitting on the topic after the drain is
+        one the pipeline never saw.
         """
-        return self.events_after - self.events_before >= self.events_produced
+        return self.events_consumed >= self.events_produced
+
+    @property
+    def accepted_all_persisted(self) -> bool:
+        """Every event the processor ACCEPTED reached the store.
+
+        The second half. Comparing produced against persisted - which two earlier versions of
+        this test did - is wrong, and wrong in the direction that manufactures alarm: the
+        pipeline legitimately rejects invalid events to a DLQ, routes late ones to the late
+        topic, and drops duplicates. Those are not losses, they are the validator working, and
+        counting them as missing reported 51,224 "lost" events on a run where the processor
+        had consumed every single one.
+
+        The honest question is whether anything vanished *without being accounted for*, and the
+        processor's own summary is the only place that distinguishes the cases.
+        """
+        return self.events_after - self.events_before >= self.events_accepted
+
+    @property
+    def accounted_for(self) -> bool:
+        return self.nothing_stranded and self.accepted_all_persisted
 
     def summary(self) -> dict[str, object]:
         return {
@@ -72,7 +117,11 @@ class ScenarioResult:
             "events_before": self.events_before,
             "events_after": self.events_after,
             "events_produced": self.events_produced,
+            "events_consumed": self.events_consumed,
+            "events_accepted": self.events_accepted,
             "delta": self.events_after - self.events_before,
+            "nothing_stranded": self.nothing_stranded,
+            "accepted_all_persisted": self.accepted_all_persisted,
             "accounted_for": self.accounted_for,
             "passed": self.passed,
             "notes": self.notes,
@@ -151,23 +200,140 @@ def _mongo_event_count() -> int:
 
 
 def _produce(vehicles: int, seed: int) -> int:
-    """Produce a known number of events, returning the count actually sent."""
-    from fleet_common.settings import kafka_settings
-    from simulator.adapters.kafka_producer import build_producer
-    from simulator.fleet import build_fleet
-    from simulator.journey import generate_day
+    """Produce events, returning the count Kafka **acknowledged**.
 
-    produced = 0
-    producer = build_producer(kafka_settings())
-    day = datetime.now(UTC).date()
+    Drives the simulator's own producer and generator. The first version of this function
+    invented ``build_producer`` and ``produce_event``, neither of which exists, and the first
+    chaos run failed on the import. The test catching that is the test working - but it
+    caught my error rather than the system's, which is a wasted run.
+
+    The acknowledged count matters rather than the generated one: an event the broker never
+    confirmed has not been produced, and counting it would build the shortfall check on a
+    false baseline and report loss that never happened.
+    """
+    import numpy as np
+
+    from fleet_common.settings import kafka_settings
+    from simulator.adapters.kafka_producer import TelemetryProducer
+    from simulator.fleet import build_fleet
+    from simulator.journey import JourneyConfig, generate_day
+
+    fleet = build_fleet(vehicle_count=vehicles, seed=seed)
+    rng = np.random.default_rng(seed)
+    config = JourneyConfig()
+    # Backdated a FULL day, matching the simulator's own --start default. One hour was not
+    # enough: generate_day produces a whole working day forward from day_start, so an hour
+    # back puts roughly 23 hours of it in the future, and the validator correctly rejects all
+    # of that as timestamp_too_far_future. The simulator defaults to yesterday for exactly
+    # this reason - a lesson already learned once in this project and not carried over here.
+    day_start = datetime.now(UTC) - timedelta(days=1)
+
+    producer = TelemetryProducer(kafka_settings())
+    generated = 0
     try:
-        for vehicle in build_fleet(count=vehicles, seed=seed):
-            for event in generate_day(vehicle, day=day, seed=seed):
-                producer.produce_event(event)
-                produced += 1
+        for vehicle in fleet:
+            events, _ = generate_day(vehicle, day_start, rng=rng, config=config)
+            producer.produce_batch(events)
+            generated += len(events)
     finally:
         producer.flush()
-    return produced
+
+    delivered = int(producer.stats.delivered)
+    if delivered != generated:
+        logger.warning("generated %d event(s) but %d were acknowledged", generated, delivered)
+    return delivered
+
+
+def _other_postgres_connections() -> int:
+    """Active backends other than this check itself.
+
+    A crude interlock, and enough of one: the failure it prevents is a concurrent job dying
+    with "server closed the connection unexpectedly", which points the reader at the wrong
+    script entirely.
+    """
+    out = _compose(
+        "exec",
+        "-T",
+        "postgres",
+        "psql",
+        "-U",
+        "fleet",
+        "-d",
+        "fleet",
+        "-At",
+        "-c",
+        "SELECT count(*) FROM pg_stat_activity"
+        " WHERE datname = 'fleet' AND pid <> pg_backend_pid() AND state = 'active'",
+        check=False,
+        timeout=30,
+    ).stdout
+    for line in reversed(out.splitlines()):
+        if line.strip().isdigit():
+            return int(line.strip())
+    return 0
+
+
+def _drain_with_processor() -> tuple[int, int, str | None]:
+    """Run the processor until the topic is quiet, returning (messages consumed, error).
+
+    In a container rather than in-process, because that is how the processor actually runs
+    and because the scenario should exercise the shipped image, not a different code path
+    assembled for the test.
+
+    Returns (consumed, accepted, error). The error is returned rather than raised so the
+    caller can report "the consumer did not run" as its own finding, distinct from data loss.
+    """
+    try:
+        completed = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                COMPOSE_NETWORK,
+                "--env-file",
+                ".env",
+                "-e",
+                "KAFKA_BOOTSTRAP_SERVERS=kafka:19092",
+                "-e",
+                "POSTGRES_HOST=postgres",
+                "-e",
+                "POSTGRES_PORT=5432",
+                "-e",
+                "MONGO_URI=mongodb://mongo:27017",
+                "-e",
+                "REDIS_URL=redis://redis:6379/0",
+                PROCESSOR_IMAGE,
+                "--idle-exit-seconds",
+                str(PROCESSOR_IDLE_EXIT_SECONDS),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        return 0, 0, str(exc)
+
+    if completed.returncode != 0:
+        tail = (completed.stderr or completed.stdout or "").strip().splitlines()[-3:]
+        return 0, 0, f"exit {completed.returncode}: {' | '.join(tail)}"
+
+    # Lift the processor's own accounting. It is the only component that knows why an event
+    # did not reach a store - accepted, duplicate, late, or rejected to the DLQ - and without
+    # those numbers this test can only compare produced against persisted, which is what made
+    # two earlier versions report loss that had not happened.
+    consumed = accepted = 0
+    for line in (completed.stderr or "").splitlines() + (completed.stdout or "").splitlines():
+        if "messages consumed" in line:
+            digits = "".join(c for c in line.split(":")[-1] if c.isdigit())
+            if digits:
+                consumed = int(digits)
+        elif "accepted" in line and ":" in line:
+            digits = "".join(c for c in line.split(":")[-1] if c.isdigit())
+            if digits:
+                accepted = int(digits)
+    return consumed, accepted, None
 
 
 def kill_and_recover(service: str, *, vehicles: int, seed: int) -> ScenarioResult:
@@ -203,8 +369,27 @@ def kill_and_recover(service: str, *, vehicles: int, seed: int) -> ScenarioResul
         result.notes.append(f"produce failed after recovery: {exc}")
         return result
 
-    # The processor consumes asynchronously, so give the pipeline time to drain before
-    # counting. Polling with a timeout rather than a fixed sleep (CLAUDE.md §12).
+    # Run a consumer. This is the step whose absence made the first version of this test
+    # declare data loss that had not happened.
+    logger.info("draining with the processor")
+    drained, accepted, drain_error = _drain_with_processor()
+    if drain_error:
+        # Distinguished from loss on purpose. "The consumer would not start" and "the
+        # consumer ran and events went missing" are different findings with different fixes,
+        # and reporting the first as the second is how a test loses its credibility.
+        result.notes.append(f"CONSUMER DID NOT RUN: {drain_error}")
+        result.notes.append(
+            "No conclusion about data loss can be drawn from this run - nothing was reading."
+        )
+        return result
+    result.events_consumed = drained
+    result.events_accepted = accepted
+    result.notes.append(
+        f"processor consumed {drained} message(s) and accepted {accepted} after recovery"
+    )
+
+    # Even with the drain finished, counting can race the last bulk write, so poll rather
+    # than sleep a fixed amount (CLAUDE.md §12).
     deadline = time.perf_counter() + 120
     while time.perf_counter() < deadline:
         result.events_after = _mongo_event_count()
@@ -213,16 +398,31 @@ def kill_and_recover(service: str, *, vehicles: int, seed: int) -> ScenarioResul
         time.sleep(5)
 
     result.passed = result.accounted_for
-    if not result.passed:
-        shortfall = result.events_produced - (result.events_after - result.events_before)
+    gained = result.events_after - result.events_before
+
+    if not result.nothing_stranded:
+        # Events produced but never consumed. This one IS loss, or at least an event the
+        # pipeline never saw, which amounts to the same thing for a cost figure.
+        stranded = result.events_produced - result.events_consumed
         result.notes.append(
-            f"SHORTFALL of {shortfall} event(s): produced {result.events_produced} but the "
-            f"store gained {result.events_after - result.events_before}. This is data loss."
+            f"STRANDED: {stranded} event(s) were produced but never consumed "
+            f"(produced {result.events_produced}, consumed {result.events_consumed}). "
+            "Either the drain stopped early or the events never reached the broker."
         )
-    else:
+    if not result.accepted_all_persisted:
+        shortfall = result.events_accepted - gained
         result.notes.append(
-            "Store gained at least what was produced. At-least-once delivery means a "
-            "redelivered batch is correct; only a shortfall would be loss."
+            f"SHORTFALL: the processor accepted {result.events_accepted} event(s) but the "
+            f"store gained only {gained} ({shortfall} missing). Accepted means validated and "
+            "destined for a store, so this is real loss."
+        )
+    if result.passed:
+        result.notes.append(
+            f"Accounted for: {result.events_consumed} consumed >= {result.events_produced} "
+            f"produced, and the store gained {gained} >= {result.events_accepted} accepted. "
+            "The difference between produced and accepted is the validator rejecting invalid "
+            "events to the DLQ, routing late ones to the late topic and dropping duplicates - "
+            "all accounted for, none lost."
         )
     return result
 
@@ -239,9 +439,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scenario", choices=[*SCENARIOS, "all"], default="broker")
     parser.add_argument("--vehicles", type=int, default=200)
     parser.add_argument("--seed", type=int, default=20260930)
+    parser.add_argument(
+        "--require-idle",
+        action="store_true",
+        help="refuse to start if PostgreSQL has other active connections",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level="INFO", format="%(asctime)s %(message)s", stream=sys.stdout)
+
+    if args.require_idle:
+        busy = _other_postgres_connections()
+        if busy:
+            print(
+                f"refusing to start: PostgreSQL has {busy} other active connection(s).\n"
+                "This script SIGKILLs the databases, so a concurrent job would fail in a way "
+                "that looks like its own bug rather than like this one.",
+                file=sys.stderr,
+            )
+            return 2
 
     targets = list(SCENARIOS) if args.scenario == "all" else [args.scenario]
     results = []
@@ -269,7 +485,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[{verdict}] {r.name}")
         print(f"  recovered after   : {r.recovered_after_seconds}s")
         print(f"  produced          : {r.events_produced:,}")
-        print(f"  store delta       : {r.events_after - r.events_before:,}")
+        # Only meaningful once the store was actually re-counted. On an early return
+        # events_after is still 0, and printing the difference then reported a delta of
+        # minus the entire baseline - an alarming number that meant nothing.
+        if r.events_after:
+            print(f"  store delta       : {r.events_after - r.events_before:,}")
+        else:
+            print("  store delta       : not re-counted (run stopped before the count step)")
         for note in r.notes:
             print(f"  note              : {note}")
     print(f"\nevidence: {out}")

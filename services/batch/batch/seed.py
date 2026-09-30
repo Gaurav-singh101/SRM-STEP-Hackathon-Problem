@@ -152,9 +152,30 @@ def seed_vehicles(
     with conn.cursor() as cur:
         for tenant_id, group in by_tenant.items():
             _set_tenant(cur, tenant_id)
+            # COPY into a TEMP table, then INSERT ... ON CONFLICT DO NOTHING.
+            #
+            # A bare COPY straight into `vehicles` is not idempotent, and that is not a
+            # theoretical objection: `build_vin` is a function of the vehicle index *only*,
+            # deliberately, so that "vehicle 7" is the same VIN at every seed and every fleet
+            # size. Scaling a 200-vehicle demo up to 100,000 is therefore the intended
+            # workflow - and it failed on `duplicate key value violates unique constraint
+            # "vehicles_pkey"` at the very first row, because the first 200 VINs are by
+            # design identical.
+            #
+            # The alternative was --truncate, which would have deleted the roster the
+            # existing telemetry refers to and left the dashboard with 100,000 vehicles and
+            # no idle events. Every other derived write in this system is an upsert keyed on
+            # its natural key; the seed job was the exception, and it had no test to notice.
+            #
+            # The TEMP table keeps the bulk path: still one COPY per tenant, still no
+            # per-row round trips (CLAUDE.md S3/S9).
+            cur.execute(
+                "CREATE TEMP TABLE vehicles_incoming"
+                " (LIKE vehicles INCLUDING DEFAULTS) ON COMMIT DROP"
+            )
             with cur.copy(
-                "COPY vehicles (vin, tenant_id, fleet_id, powertrain_code, class_code,"
-                " fuel_type, registration, model_year, is_active) FROM STDIN"
+                "COPY vehicles_incoming (vin, tenant_id, fleet_id, powertrain_code,"
+                " class_code, fuel_type, registration, model_year, is_active) FROM STDIN"
             ) as copy:
                 for vehicle in group:
                     copy.write_row(
@@ -170,7 +191,18 @@ def seed_vehicles(
                             True,
                         )
                     )
-            written += len(group)
+            cur.execute(
+                "INSERT INTO vehicles (vin, tenant_id, fleet_id, powertrain_code,"
+                " class_code, fuel_type, registration, model_year, is_active)"
+                " SELECT vin, tenant_id, fleet_id, powertrain_code, class_code,"
+                " fuel_type, registration, model_year, is_active FROM vehicles_incoming"
+                " ON CONFLICT (vin) DO NOTHING"
+            )
+            # rowcount, not len(group): re-running must report what it actually inserted,
+            # not restate its input. A seed that claims 100,000 writes on a no-op run is the
+            # same class of lie as a coverage figure from an earlier commit.
+            written += max(cur.rowcount, 0)
+            cur.execute("DROP TABLE IF EXISTS vehicles_incoming")
     return written
 
 
