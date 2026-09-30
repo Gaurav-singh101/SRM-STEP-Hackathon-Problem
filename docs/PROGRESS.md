@@ -4,6 +4,74 @@ Session handoff record (CLAUDE.md S17). Newest first.
 
 ---
 
+## 2026-09-30 - Completion pass: the remaining deliverables
+
+Audited the repo against the PDF deliverables checklist and found five empty directories
+where deliverables were supposed to be. Filled them.
+
+### Done
+
+| Deliverable | State |
+|---|---|
+| `reconcile-late` CLI | Wired: drain -> group -> re-segment -> replace vehicle-day -> recompute rollups -> audit row |
+| Architecture diagram | `docs/architecture/architecture.md` - C4 L1/L2, three sequence diagrams, layering, scaling, cloud boundary |
+| ER diagram | `docs/architecture/er-diagram.md` - 3NF, every rollup labelled with why it is denormalised |
+| Helm charts | `infra/helm/fleet-platform/` - shared `_helpers.tpl`, Deployments, CronJobs, HPA, PDB, non-root, read-only rootfs |
+| Terraform (AWS) | `infra/terraform/aws/` - VPC, EKS, MSK, RDS, ElastiCache, S3, Secrets Manager, budget alarm |
+| Load scenario | `tests/load/run_scenario.py` - producer throughput with per-second percentiles |
+| Chaos scenario | `tests/chaos/run.py` - kills broker/Postgres/Redis, **reconciles counts**, fails on a shortfall |
+| Solution Document | `docs/solution-document/SOLUTION.md` - all 17 template sections |
+| ADR-0008 | Closes D9, D10 and the rest of D11 |
+
+D1-D3, D5-D7, D9-D11 are now all DECIDED with an ADR. D4 (auth vendor) and D8 (MSK vs
+Strimzi) remain open by design - both are deployment choices the code is deliberately
+agnostic to.
+
+### Findings worth keeping
+
+- **Five deliverable directories existed but were empty.** `infra/terraform`, `infra/helm`,
+  `docs/architecture`, `docs/solution-document` and `docs/evidence/chaos` had been created
+  early and never filled. An empty directory in a tree reads as "started" at a glance, which
+  is worse than absent - it is why this pass began with a checklist audit rather than with
+  code.
+- **Three Makefile targets pointed at modules that did not exist**: `tests.load.run_scenario`,
+  `tests.chaos.run` and `tests.tools.pin_digests`. The first two now exist. `pin-digests` is
+  still a target with no module behind it.
+- **The chaos test asserts accounting, not recovery.** "The container came back" is trivial to
+  observe and proves nothing about the data. Each scenario now takes a baseline count,
+  produces a known number of events, SIGKILLs a service, waits for health, and reconciles.
+  A shortfall fails the command. At-least-once delivery means a *surplus* is correct, so the
+  assertion is `>=`, not `==`.
+- **The load script cannot prove the 100K events/s NFR and says so in the artefact it
+  writes.** The caveat is embedded in the JSON, not just the README, so the number cannot be
+  quoted without it.
+- **Terraform `validate` needs no credentials.** Worth stating plainly because "no AWS
+  account" sounds like it blocks the IaC deliverable and does not: `fmt`, `init -backend=false`
+  and `validate` are all credential-free. Only `plan` and `apply` need an account, and those
+  were never in scope.
+
+### Blocked on the environment, not on design
+
+Docker Desktop is not running (the machine restarted - Windows build 26200 -> 26300), so
+these are written but **not yet executed**:
+
+- `make tf-validate` - Terraform fmt/init/validate + config scan
+- `make helm-validate` - Helm lint + template for both value sets
+- `make load` / `make chaos` - both need the stack
+- The live `reconcile-late` run for compliance evidence
+- Integration suite (Testcontainers)
+
+Everything that does not need Docker is green: ruff, ruff format, mypy --strict across 56
+modules, the unit suite and the 19 BDD scenarios.
+
+### Next
+
+1. Start Docker Desktop, then run the five items above and commit their evidence.
+2. Tag `v1.0-submission` at code freeze.
+3. Demo video - not produced, and SOLUTION.md S13 says so rather than listing it as done.
+
+---
+
 ## 2026-09-29 - Day 3 start: query plans, STRIDE, and a measured NFR defect
 
 ### Done

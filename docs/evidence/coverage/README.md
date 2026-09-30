@@ -5,7 +5,7 @@ the figure moves, so nothing here is a number from an earlier state of the repos
 
 | Field | Value |
 |---|---|
-| Date (UTC) | 2026-09-29 |
+| Date (UTC) | 2026-09-30 |
 | Commit | recorded by the commit that adds this file |
 | Command | `uv run pytest -m "not integration" --cov --cov-report=xml:docs/evidence/coverage/coverage.xml --cov-fail-under=80` |
 | Interpreter | Python 3.12.13 (uv-managed) |
@@ -16,18 +16,18 @@ the figure moves, so nothing here is a number from an earlier state of the repos
 
 | Metric | Value | Gate |
 |---|---|---|
-| **Combined line + branch (the gated figure)** | **84.18%** | **80%** |
-| Line coverage only | 85.01% | - |
-| Branch coverage only | 79.39% | - |
-| Tests passed | **577** | all must pass |
-| Deselected (integration) | 42 | run separately, see below |
-| Duration | 157 s | - |
+| **Combined line + branch (the gated figure)** | **84.56%** | **80%** |
+| Line coverage only | 85.32% | - |
+| Branch coverage only | 80.12% | - |
+| Tests passed | **609** | all must pass |
+| Deselected (integration) | 49 | run separately, see below |
+| Duration | 1293 s | Far slower than an earlier 157 s run on the same suite. Machine was freshly restarted; not investigated, and recorded rather than smoothed over. |
 
 Three numbers, not one, because they are different measurements and quoting only the
 highest would be misleading. `--cov-fail-under` compares against coverage.py's combined
 line-and-branch figure, which is the one the gate enforces and the one to cite. The
-85.01% and 79.39% are the separate `line-rate` and `branch-rate` attributes in
-`coverage.xml`: 2,415 of 2,841 lines and 389 of 490 branches.
+85.32% and 80.12% are the separate `line-rate` and `branch-rate` attributes in
+`coverage.xml`: 2,535 of 2,971 lines and 407 of 508 branches.
 
 **The figure has fallen over time, from 95.63% on Day 1.** That is expected rather than a
 regression: Day 1 was almost entirely pure domain code, which is cheap to cover

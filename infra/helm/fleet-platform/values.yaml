@@ -1,0 +1,131 @@
+# Default values: a portable deployment with no cloud assumptions.
+#
+# Nothing here names a cloud provider. Anything AWS-specific belongs in values-aws.yaml,
+# which is the boundary CLAUDE.md S13 requires: switching cloud means new values and new
+# IaC, never new application code.
+
+global:
+  # Pinned by digest in production. A tag is mutable, and "the image that was tested" and
+  # "the image that is running" must be the same bytes (CLAUDE.md S11).
+  imageRegistry: ghcr.io/example
+  imageTag: "1.0.0"
+  imagePullPolicy: IfNotPresent
+
+# Which managed backing services to expect. Off by default: the chart assumes the
+# infrastructure is provided, because a Helm chart that also installs its own Kafka is a
+# demo, not a deployment.
+externalServices:
+  kafka:
+    bootstrapServers: kafka:9092
+  postgres:
+    host: postgres
+    port: 5432
+    database: fleet
+    # Never a literal. The value is read from a Secret; see secretName below.
+    existingSecret: fleet-postgres
+  mongo:
+    uriSecret: fleet-mongo
+  redis:
+    url: redis://redis:6379/0
+
+auth:
+  # D4 is open, so this is generic OIDC. No vendor appears in the chart.
+  oidcIssuer: http://oidc:8081
+  oidcAudience: fleet-api
+  oidcJwksUrl: http://oidc:8081/jwks.json
+  allowedAlgorithms: "RS256,ES256"
+
+# Business parameters. In config, never in code, and versioned so a past cost figure stays
+# reproducible (CLAUDE.md S7, ADR-0001/0002/0003).
+business:
+  idleMinSeconds: 180
+  idleExcessiveSeconds: 600
+  idleGapToleranceSeconds: 30
+  fuelFormulaVersion: idle-fuel-v1
+  utilisationFormulaVersion: utilisation-v1
+  defaultCurrency: INR
+  allowedLatenessSeconds: 300
+
+# Applied to every pod. Defaults chosen to satisfy the restricted Pod Security Standard.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+api:
+  enabled: true
+  replicas: 2
+  port: 8000
+  resources:
+    requests: { cpu: 200m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  # Liveness and readiness live here rather than as a Dockerfile HEALTHCHECK: one image
+  # serves four services and only this one speaks HTTP. Trivy DS-0026 refers.
+  livenessPath: /healthz
+  readinessPath: /readyz
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+processor:
+  enabled: true
+  # Scaling is replicas against partitions, never a code change. 96 partitions gives
+  # headroom to ~96 consumers; 4 is the local default (ADR-0004, ADR-0005).
+  replicas: 4
+  batchMaxMessages: 5000
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { cpu: "2", memory: 1Gi }
+  # No HTTP probes: the processor is a consumer loop. Liveness is expressed as consumer
+  # group membership, which the broker already enforces via session.timeout.ms.
+
+web:
+  enabled: true
+  replicas: 2
+  port: 8080
+  apiBaseUrl: http://api:8000
+
+simulator:
+  # Off by default. It generates load and has no place in a real deployment.
+  enabled: false
+  vehicles: 100000
+  seed: 20260929
+
+batch:
+  # CronJobs, not Deployments: these are jobs that are meant to finish.
+  rollup:
+    enabled: true
+    schedule: "15 * * * *"
+    days: 2
+  utilisation:
+    enabled: true
+    schedule: "30 2 * * *"
+  partitions:
+    enabled: true
+    schedule: "0 3 * * 0"
+    monthsForward: 2
+  reconcileLate:
+    # Late events are rare but must not accumulate: an unconsumed telemetry.late topic is
+    # how "never silently drop" quietly stops being true (ADR-0007).
+    enabled: true
+    schedule: "45 * * * *"
+
+serviceAccount:
+  create: true
+  name: ""
+
+networkPolicy:
+  # Off by default because it needs a CNI that enforces it, and a policy that is silently
+  # ignored is worse than none - it reads as protection that is not there.
+  enabled: false

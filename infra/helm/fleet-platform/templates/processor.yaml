@@ -1,0 +1,53 @@
+{{- if .Values.processor.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fleet.fullname" . }}-processor
+  labels:
+    {{- include "fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: processor
+spec:
+  # Replicas against partitions. Scaling throughput is this number and the partition
+  # count, never a code change (ADR-0005).
+  replicas: {{ .Values.processor.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: processor
+  strategy:
+    # Recreate rather than RollingUpdate. A rolling update of a consumer group triggers a
+    # rebalance per pod; with cooperative-sticky that is survivable but pointlessly noisy,
+    # and consumer lag is easier to reason about across one clean restart.
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        {{- include "fleet.labels" . | nindent 8 }}
+        app.kubernetes.io/component: processor
+    spec:
+      serviceAccountName: {{ include "fleet.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      # Long enough to finish the in-flight batch and commit its offsets. Killed sooner,
+      # the batch is reprocessed on restart - safe, because writes are idempotent, but it
+      # wastes work and muddies the lag metric.
+      terminationGracePeriodSeconds: 60
+      volumes:
+        {{- include "fleet.writableVolumes" . | nindent 8 }}
+      containers:
+        - name: processor
+          image: {{ include "fleet.image" . }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: FLEET_SERVICE_MODULE
+              value: processor
+            - name: KAFKA_BATCH_MAX_MESSAGES
+              value: {{ .Values.processor.batchMaxMessages | quote }}
+            {{- include "fleet.env" . | nindent 12 }}
+          volumeMounts:
+            {{- include "fleet.writableVolumeMounts" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.processor.resources | nindent 12 }}
+{{- end }}

@@ -4,6 +4,8 @@ Two things here cannot be tested any other way. The CHECK constraint that makes 
 miscount impossible is enforced by the database, so a fake would only re-test the
 assertion in the Python dataclass. And the tenant policy on the table decides whether one
 tenant can read another's fleet size, which is a property of the policy, not of the query.
+
+Marked `integration`: these need a container runtime. Run with `-m integration`.
 """
 
 from __future__ import annotations
@@ -14,6 +16,12 @@ import psycopg
 import pytest
 
 from tests.integration.conftest import TENANT_A, TENANT_B
+
+# Without this the module is collected by the unit suite, where Testcontainers blocks on a
+# Docker daemon that may not be running - which is exactly what happened: `-m "not
+# integration"` appeared to hang for minutes with no output. The marker is the deselection
+# mechanism, so a file that omits it silently opts into the wrong suite.
+pytestmark = pytest.mark.integration
 
 WINDOW_END = date(2026, 9, 29)
 

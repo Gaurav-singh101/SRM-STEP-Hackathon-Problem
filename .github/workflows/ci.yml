@@ -50,6 +50,12 @@ jobs:
       - name: mypy (strict on libs and domain)
         run: uv run mypy
 
+      # A tag is mutable, so "the image we tested" and "the image that runs" can diverge
+      # without any diff showing it (CLAUDE.md S11). --check writes nothing and fails if any
+      # reference is tag-only.
+      - name: Container images pinned by digest
+        run: uv run python -m tests.tools.pin_digests docker-compose.yml --check
+
       - name: Unit tests with coverage gate
         # Gate scope is libs + domain + application (ruling G7); adapters are
         # measured but report-only so the gate cannot be gamed.

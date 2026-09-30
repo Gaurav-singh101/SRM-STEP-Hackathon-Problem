@@ -137,12 +137,44 @@ security: ## Dependency, secret and config scans into docs/evidence/security/
 	$(UV) run python -m tests.tools.scan_summary
 
 .PHONY: chaos
-chaos: ## Kill a broker and a consumer, prove recovery
-	$(UV) run python -m tests.chaos.run
+chaos: ## Kill a broker and a store, prove recovery AND that nothing was lost
+	$(UV) run python -m tests.chaos.run --scenario all
+
+# Terraform and Helm run in containers, so neither needs a local install - and neither needs
+# cloud credentials. validate and fmt are credential-free; plan and apply are not and are out
+# of scope (there is no AWS account). See infra/terraform/aws/README.md.
+TF_IMAGE   ?= hashicorp/terraform:1.9
+HELM_IMAGE ?= alpine/helm:3.16.2
+TF_RUN      = docker run --rm -v "$(CURDIR)/infra/terraform/aws:/tf" -w /tf $(TF_IMAGE)
+HELM_RUN    = docker run --rm -v "$(CURDIR)/infra/helm:/charts" -w /charts $(HELM_IMAGE)
+
+.PHONY: tf-validate
+tf-validate: ## Format-check, init and validate the Terraform; then scan it. No credentials.
+	$(TF_RUN) fmt -check -recursive
+	$(TF_RUN) init -backend=false -input=false
+	$(TF_RUN) validate
+	docker run --rm -v "$(CURDIR):/src" -v trivy-cache:/root/.cache $(TRIVY_IMAGE) 		config --quiet --severity CRITICAL,HIGH,MEDIUM /src/infra/terraform
+
+.PHONY: helm-validate
+helm-validate: ## Lint and render the charts, then schema-check the output
+	$(HELM_RUN) lint fleet-platform
+	$(HELM_RUN) lint fleet-platform -f fleet-platform/values-aws.yaml
+	$(HELM_RUN) template fleet fleet-platform > /dev/null
+	$(HELM_RUN) template fleet fleet-platform -f fleet-platform/values-aws.yaml > /dev/null
+
+.PHONY: helm-deploy-local
+helm-deploy-local: ## Install the charts on the local cluster (Docker Desktop Kubernetes)
+	kubectl config current-context
+	$(HELM_RUN) template fleet fleet-platform --set api.hpa.enabled=false > /tmp/fleet.yaml
+	kubectl apply --dry-run=server -f /tmp/fleet.yaml
 
 .PHONY: pin-digests
 pin-digests: ## Resolve image tags in docker-compose.yml to pinned digests (CLAUDE.md S11)
 	$(UV) run python -m tests.tools.pin_digests docker-compose.yml
+
+.PHONY: check-digests
+check-digests: ## Fail if any compose image is pinned by tag only. Runs in CI.
+	$(UV) run python -m tests.tools.pin_digests docker-compose.yml --check
 
 # --- Cloud ----------------------------------------------------------------
 

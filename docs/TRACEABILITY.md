@@ -76,6 +76,16 @@ section. `Dn` = open decision.
 | CM-14 | Utilisation coverage stated, never implied | `utilisation_window` table, `UtilisationCoverage` | `test_utilisation_window.py` (7 unit + 7 integration) | Done |
 | D10 | Alert latency split from data age | `AlertRow.processing_latency_seconds` | `test_a_replayed_alert_is_flagged_...` | Done |
 | PDF-11 | STRIDE threat model, gaps named rather than omitted | `docs/STRIDE.md` | 6 trust boundaries, 5 open items ranked | Done |
+| PDF-13 | Helm charts with shared template library | `infra/helm/fleet-platform/` | `make helm-validate`; probes, HPA, PDB, CronJobs, non-root | Done |
+| PDF-13 | Terraform for AWS | `infra/terraform/aws/` | `make tf-validate` - written and validated, **never applied** (no account) | Done |
+| PDF-13 | Architecture diagram | `docs/architecture/architecture.md` | C4 L1/L2, sequence, layering, scaling | Done |
+| PDF-13 | ER diagram, 3NF, denormalisations justified | `docs/architecture/er-diagram.md` | every rollup labelled with why | Done |
+| PDF-13 | Solution Document, 17 sections | `docs/solution-document/SOLUTION.md` | unmet NFRs stated as unmet | Done |
+| PDF-12 | Load scenario with a scaling ladder | `tests/load/run_scenario.py` | `docs/evidence/load/` - labelled LOCAL | Done |
+| PDF-12 | Chaos: kill infra, prove recovery AND no loss | `tests/chaos/run.py` | fails on a shortfall, not just on non-recovery | Done |
+| PDF-16 | Algorithms + complexity write-up | SOLUTION.md S6.5 | with before/after query plans | Done |
+| D6 | Late-event reconciliation | `batch/reconcile.py`, `reconcile-late` | ADR-0007, 43 batch tests | Done |
+| PDF-13 | Demo video (5 min) | - | **NOT PRODUCED** - stated in SOLUTION.md S13 | **Open** |
 | PDF-12 | Dependency, secret and config scans | `make security`, `tests/tools/scan_summary.py` | `docs/evidence/security/` — 83 Python + 355 npm packages, 0 vulns, 1 LOW misconfig | Done |
 | PDF-12 | A scan failure actually fails the build | `scan_summary.py` exit code | `test_scan_summary.py` (7 cases) | Done |
 | PDF-12 | SAST (Semgrep) evidence committed | `docs/evidence/security/` | CI runs it; artefacts **not committed**, no local evidence yet | **Open** |
@@ -100,7 +110,6 @@ section. `Dn` = open decision.
 | D6 | Rollups and late-event reconciliation | `services/batch` | **Planned (Day 2)** |
 | PDF-9 | Geohash depot grouping, top-K, DTC surfacing | `libs/`, `web/` | **Partial** - DTC parsing done |
 | PDF-11 | Load, soak and chaos evidence | `docs/evidence/` | **Planned (Day 3)** |
-| PDF-13 | Terraform and Helm | `infra/` | **Planned (Day 3)** |
 | PDF-13 | Solution Document, ER diagram, demo video | `docs/` | **Planned (Day 4)** |
 
 ## Infrastructure and process
@@ -110,7 +119,7 @@ section. `Dn` = open decision.
 | PDF-13 | One-command local setup | `docker-compose.yml`, `Makefile`, `make.ps1` | all four stores healthy | Done |
 | PDF-13 | Containerised services | `infra/docker/python-service.Dockerfile` | non-root, multi-stage, builds | Done |
 | PDF-12 | CI on every push | `.github/workflows/ci.yml` | quality, contract, security, integration | Done |
-| PDF-12 | 80%+ coverage on core logic | `pyproject.toml` gate, CI | **84.18%**, 577 tests; `docs/evidence/coverage/` | Done |
+| PDF-12 | 80%+ coverage on core logic | `pyproject.toml` gate, CI | **84.56%**, 609 tests; `docs/evidence/coverage/` | Done |
 | PDF-13 | 3-5 ADRs | `docs/adr/0001`-`0006` | 6 written | Done |
 | CM-3 | No secrets in the repository | `.env.example`, NOLOGIN DB roles | `test_no_migration_contains_a_hardcoded_password` | Done |
 | CM-4 | Redis pinned to 7.2.x for licence reasons | `docker-compose.yml` | ADR-0002 note | Done |

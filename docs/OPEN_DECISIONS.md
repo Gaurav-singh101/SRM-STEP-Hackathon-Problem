@@ -16,9 +16,9 @@ wait for the developer's answer, record an ADR, and only then treat it as final.
 | D6 | Batch/historical store | **PARTIAL** | ADR-0007 | Reconciliation **decided** 2026-09-30: re-segment the affected vehicle-day inside the Mongo TTL, count and log anything older. Postgres partitions + incremental rollups in place. **Cold tier still open** - Parquet behind an `ObjectStore` port would narrow the TTL gap. |
 | D7 | Telemetry event schema | **DECIDED** | ADR-0004 | Extends the PDF example, which has no ignition/fuel signals. |
 | D8 | Kafka hosting on AWS | **OPEN** | - | Proposed: Strimzi on EKS for portability and cost; MSK as a Terraform module flag. Constrained by the free-tier account - see PROGRESS blocker B3. |
-| D9 | EV handling | **OPEN** | - | Proposed: ICE/hybrid in scope for fuel cost, BEVs utilisation-only, never silently summed into a fleet total. Partly implemented in ADR-0002; ADR due. |
-| D10 | "Critical alert" definition | **OPEN** | - | Proposed: `EXCESSIVE_IDLE_IN_PROGRESS` and `IDLE_COST_SPIKE`. SLO measured as `alert_persisted_ts - triggering_event_ts`. The state machine already emits the transition once per segment. |
-| D11 | Currency, fuel price, tenancy | **PARTIAL** | ADR-0002 | Money representation decided (`Decimal`, `numeric(14,4)`, INR default). Temporal price table and shared-schema + RLS tenancy still need an ADR. |
+| D9 | EV handling | **DECIDED** | ADR-0008 | ICE/hybrid in scope for fuel cost; BEVs utilisation-only. `estimate_idle_cost` raises rather than returning zero, and any partial total names its excluded count. Idle *energy* for BEVs is out of scope. |
+| D10 | "critical alert" definition | **DECIDED** | ADR-0008 | Two types: `EXCESSIVE_IDLE_IN_PROGRESS`, `IDLE_COST_SPIKE`. Suppression enforced by a unique index. SLO measured as **processing** latency, after end-to-end reported 83,711 s on a backfill. |
+| D11 | Currency, fuel price, tenancy | **DECIDED** | ADR-0002, 0006, 0008 | Temporal per-tenant price table, prices appended never updated, `price_id` stored on every event. One currency per tenant. Shared schema + RLS, rollups tenant-scoped too. |
 
 ## Rulings carried from review
 

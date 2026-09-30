@@ -1,0 +1,118 @@
+{{- if .Values.api.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fleet.fullname" . }}-api
+  labels:
+    {{- include "fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        {{- include "fleet.labels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: {{ include "fleet.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      volumes:
+        {{- include "fleet.writableVolumes" . | nindent 8 }}
+      containers:
+        - name: api
+          image: {{ include "fleet.image" . }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: FLEET_SERVICE_MODULE
+              value: api
+            - name: API_PORT
+              value: {{ .Values.api.port | quote }}
+            {{- include "fleet.env" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+          # The probes the Dockerfile deliberately does not carry: one image serves four
+          # services and only this one speaks HTTP, so liveness belongs here where it can
+          # be correct rather than in a shared base where it cannot.
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.api.livenessPath }}
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          # /readyz checks dependencies and reports degraded rather than failing, so a
+          # Redis outage takes the pod out of the load balancer without crash-looping it.
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.api.readinessPath }}
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            {{- include "fleet.writableVolumeMounts" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "fleet.fullname" . }}-api
+  labels:
+    {{- include "fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: {{ .Values.api.port }}
+      targetPort: http
+{{- if .Values.api.hpa.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "fleet.fullname" . }}-api
+  labels:
+    {{- include "fleet.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "fleet.fullname" . }}-api
+  minReplicas: {{ .Values.api.hpa.minReplicas }}
+  maxReplicas: {{ .Values.api.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.api.hpa.targetCPUUtilizationPercentage }}
+{{- end }}
+---
+# A PDB so a node drain cannot take the whole API down at once. Without it, "rolling"
+# maintenance can still be an outage.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "fleet.fullname" . }}-api
+  labels:
+    {{- include "fleet.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api
+{{- end }}

@@ -69,6 +69,11 @@ runs the same commands:
 | `make test-integration` | `./make.ps1 test-integration` | Testcontainers integration tests |
 | `make test-acceptance` | `./make.ps1 test-acceptance` | BDD scenarios (behave), no infrastructure needed |
 | `make sql-plans` | `./make.ps1 sql-plans` | Before/after query plans into `docs/evidence/sql/` |
+| `make security` | `./make.ps1 security` | Trivy scans; **fails** on CRITICAL/HIGH |
+| `make load` | - | Producer throughput + scaling ladder into `docs/evidence/load/` |
+| `make chaos` | - | Kill broker/Postgres/Redis; proves recovery **and** no event loss |
+| `make tf-validate` | - | Terraform fmt + init + validate + config scan. **No cloud credentials needed** |
+| `make helm-validate` | - | Helm lint + template for both value sets |
 | `make sim N=100000` | `./make.ps1 sim -N 100000` | Run the simulator |
 | `make load` | - | Load scenario into `docs/evidence/load/` |
 | `make cloud-down` | - | Tear down the AWS environment |

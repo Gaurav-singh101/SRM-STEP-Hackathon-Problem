@@ -1,0 +1,48 @@
+# AWS-specific overrides. THE ONLY place in the chart that names a cloud.
+#
+# This file is the boundary CLAUDE.md S13 requires: application code depends on environment
+# configuration and standard protocols, so switching cloud means a different values file and
+# different IaC, never different code. Nothing here is referenced by any template
+# conditionally on "is this AWS" - the templates simply take values.
+#
+# NOT APPLIED. There is no AWS account for this project, so these values have never been
+# used against a live cluster. They are written and validated, and the charts themselves are
+# verified against a real local Kubernetes cluster.
+
+global:
+  imageRegistry: 123456789012.dkr.ecr.ap-south-1.amazonaws.com
+  appEnv: production
+
+externalServices:
+  kafka:
+    # MSK or Strimzi on EKS - D8 is still open, and the chart does not care which, which is
+    # the point of putting the endpoint in values.
+    bootstrapServers: b-1.fleet.abcdef.c2.kafka.ap-south-1.amazonaws.com:9096
+  postgres:
+    host: fleet.abcdef.ap-south-1.rds.amazonaws.com
+    port: 5432
+    database: fleet
+    # Populated by the External Secrets Operator from AWS Secrets Manager. The chart never
+    # sees the value, and nor does `helm get values`.
+    existingSecret: fleet-postgres
+  mongo:
+    uriSecret: fleet-mongo
+  redis:
+    url: rediss://fleet.abcdef.ng.0001.aps1.cache.amazonaws.com:6379/0
+
+api:
+  replicas: 3
+  hpa:
+    minReplicas: 3
+    maxReplicas: 20
+
+processor:
+  # 96 partitions gives headroom to ~96 consumers. 24 is a starting point for the 100K
+  # events/s target at the measured 4,404 events/s per consumer (ADR-0005).
+  replicas: 24
+  resources:
+    requests: { cpu: "1", memory: 1Gi }
+    limits: { cpu: "2", memory: 2Gi }
+
+networkPolicy:
+  enabled: true

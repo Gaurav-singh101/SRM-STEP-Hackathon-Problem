@@ -249,6 +249,184 @@ def run_erase_driver(tenant_id: str, driver_id: int, requested_by: str) -> int:
     return 0 if verdict["erased"] else 1
 
 
+def run_reconcile_late(max_messages: int, dry_run: bool) -> int:
+    """Drain telemetry.late and put the derived record right (ADR-0007).
+
+    Reuses the processor's own segmentation and the batch rollups rather than
+    reimplementing either: a second definition of an idle event would eventually
+    disagree with the first.
+    """
+    from batch.adapters.late_topic import LateTopicDrain, decode_late_events
+    from batch.adapters.mongo_samples import MongoSampleSource
+    from batch.reconcile import (
+        ReconciliationCounts,
+        fold_outcomes,
+        group_by_vehicle_day,
+        reconcile_vehicle_day,
+        replace_vehicle_day,
+        rollup_days_for,
+    )
+    from fleet_common.settings import cost_settings, kafka_settings, mongo_settings
+
+    settings = postgres_settings()
+    counts = ReconciliationCounts()
+    began = time.perf_counter()
+
+    drain = LateTopicDrain(kafka_settings())
+    source = MongoSampleSource(mongo_settings())
+    try:
+        raw = drain.drain(max_messages=max_messages)
+        events, decode_failures = decode_late_events(raw)
+        counts.events_consumed = len(raw)
+        counts.errors.extend(decode_failures)
+
+        if not events:
+            print("nothing on the late topic")
+            _record_reconciliation(settings.dsn, counts, began)
+            return 0
+
+        grouped = group_by_vehicle_day(events)
+        logger.info("%d late event(s) across %d vehicle-day(s)", len(events), len(grouped))
+
+        run_id = _record_reconciliation(settings.dsn, counts, began, open_only=True)
+
+        with psycopg.connect(settings.dsn, row_factory=psycopg.rows.tuple_row) as conn:
+            from processor.__main__ import build_pipeline_config, load_prices
+            from processor.adapters.sinks import PostgresSink
+            from processor.pipeline import BatchProcessor
+
+            prices = load_prices(settings.dsn, cost_settings().default_currency)
+            config = build_pipeline_config(prices)
+            sink = PostgresSink(settings)
+            try:
+                vins = sorted({key.vin for key in grouped})
+                vehicles = sink.load_vehicles(vins)
+
+                outcomes = []
+                reconciled_keys = []
+                for key in sorted(grouped):
+                    outcome, segments, trips = reconcile_vehicle_day(
+                        key,
+                        grouped[key],
+                        source=source,
+                        segmenter=lambda: BatchProcessor(config),
+                        vehicles=vehicles,
+                        now=datetime.now(UTC),
+                    )
+                    outcomes.append(outcome)
+                    if not outcome.reconciled or dry_run:
+                        continue
+                    try:
+                        replace_vehicle_day(
+                            conn,
+                            key,
+                            idle_writer=sink.write_idle_events,
+                            trip_writer=sink.write_trips,
+                            segments=segments,
+                            trips=trips,
+                        )
+                        reconciled_keys.append(key)
+                    except psycopg.Error as exc:
+                        conn.rollback()
+                        counts.errors.append(f"{key}: {exc}")
+
+                fold_outcomes(outcomes, counts)
+
+                if reconciled_keys and not dry_run:
+                    for tenant_id, day in sorted(rollup_days_for(reconciled_keys)):
+                        compute_vehicle_daily(conn, day=day, tenant_id=tenant_id)
+                        compute_fleet_daily(conn, day=day, tenant_id=tenant_id)
+                        counts.rollup_days_recomputed += 1
+            finally:
+                sink.close()
+
+        # Offsets advance only once the work is durable, matching the processor. A late
+        # event nothing will resend must not be lost to an optimistic commit.
+        if not dry_run and not counts.errors:
+            drain.commit()
+        _record_reconciliation(settings.dsn, counts, began, run_id=run_id)
+    finally:
+        source.close()
+        drain.close()
+
+    elapsed = time.perf_counter() - began
+    print(f"events consumed    : {counts.events_consumed:,}")
+    print(f"vehicle-days fixed : {counts.vehicle_days_reconciled:,}")
+    print(f"idle events written: {counts.idle_events_written:,}")
+    print(f"trips written      : {counts.trips_written:,}")
+    print(f"rollup days redone : {counts.rollup_days_recomputed:,}")
+    if counts.events_unreconcilable:
+        # Never buried. This is the number that says whether the hot-tier TTL is costing
+        # the fleet corrected figures, and it is the reason this log exists at all.
+        print(f"UNRECONCILABLE     : {counts.events_unreconcilable:,} event(s)")
+        for reason, n in sorted(counts.unreconcilable_reasons.items()):
+            print(f"  {reason}: {n} vehicle-day(s)")
+        print("  These events were NOT discarded; they are recorded in reconciliation_log.")
+    if dry_run:
+        print("DRY RUN - nothing was written and no offsets were committed")
+    print(f"elapsed            : {elapsed:.2f}s")
+
+    if counts.errors:
+        print(file=sys.stderr)
+        for error in counts.errors:
+            print(f"  {error}", file=sys.stderr)
+        print("offsets were NOT committed; re-run once fixed", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _record_reconciliation(
+    dsn: str,
+    counts: Any,
+    began: float,
+    *,
+    open_only: bool = False,
+    run_id: int | None = None,
+) -> int:
+    """Open or complete the run's audit row.
+
+    Opened before any write and completed after, like the erasure log: a run that fails
+    half way must still leave a record that it was attempted.
+    """
+    import orjson
+
+    with psycopg.connect(dsn, row_factory=psycopg.rows.tuple_row) as conn, conn.cursor() as cur:
+        cur.execute("SET ROLE fleet_batch")
+        if run_id is None:
+            cur.execute(
+                "INSERT INTO reconciliation_log (events_consumed) VALUES (%s) RETURNING run_id",
+                (counts.events_consumed,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise RuntimeError("failed to open a reconciliation audit record")
+            new_id = int(row[0])
+            if open_only:
+                conn.commit()
+                return new_id
+            run_id = new_id
+
+        cur.execute(
+            "UPDATE reconciliation_log SET finished_at = now(), events_consumed = %s,"
+            " vehicle_days_reconciled = %s, idle_events_written = %s, trips_written = %s,"
+            " rollup_days_recomputed = %s, events_unreconcilable = %s,"
+            " unreconcilable_reasons = %s, errors = %s WHERE run_id = %s",
+            (
+                counts.events_consumed,
+                counts.vehicle_days_reconciled,
+                counts.idle_events_written,
+                counts.trips_written,
+                counts.rollup_days_recomputed,
+                counts.events_unreconcilable,
+                orjson.dumps(dict(counts.unreconcilable_reasons)).decode(),
+                orjson.dumps(counts.errors).decode(),
+                run_id,
+            ),
+        )
+        conn.commit()
+    return run_id
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="batch", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -265,6 +443,16 @@ def main(argv: list[str] | None = None) -> int:
     partitions.add_argument("--months-forward", type=int, default=2)
 
     sub.add_parser("check-default-partitions", help="report rows in DEFAULT partitions")
+
+    reconcile = sub.add_parser(
+        "reconcile-late", help="drain telemetry.late and recompute affected vehicle-days"
+    )
+    reconcile.add_argument("--max-messages", type=int, default=100_000)
+    reconcile.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report what would change without writing or committing offsets",
+    )
 
     erase = sub.add_parser("erase-driver", help="erase a driver's personal data")
     erase.add_argument("--tenant", type=str, required=True)
@@ -288,6 +476,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_partitions(args.months_forward)
         if args.command == "check-default-partitions":
             return run_default_partition_check()
+        if args.command == "reconcile-late":
+            return run_reconcile_late(args.max_messages, args.dry_run)
         if args.command == "erase-driver":
             return run_erase_driver(args.tenant, args.driver_id, args.requested_by)
     except psycopg.Error as exc:

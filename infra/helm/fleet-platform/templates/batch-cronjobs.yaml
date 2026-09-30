@@ -1,0 +1,73 @@
+{{/*
+The batch jobs, as CronJobs rather than Deployments: each is meant to finish. A Deployment
+would restart them forever, and a "healthy" pod would mean nothing.
+*/}}
+{{- range $name, $job := dict "rollup" .Values.batch.rollup "utilisation" .Values.batch.utilisation "partitions" .Values.batch.partitions "reconcile-late" .Values.batch.reconcileLate }}
+{{- if $job.enabled }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "fleet.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "fleet.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: batch
+spec:
+  schedule: {{ $job.schedule | quote }}
+  # Forbid, not Allow. Two rollup runs over the same day would race on the same upsert
+  # keys; they would not corrupt anything (every write is keyed) but they would waste work
+  # and make the recomputed_at timestamps meaningless.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # Kept deliberately: a failed reconciliation run is evidence, and the reconciliation_log
+  # row points at a pod whose logs should still exist.
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      # One retry. These jobs are idempotent so a retry is safe, but a job failing twice is
+      # a real problem and should surface rather than be hidden by a retry loop.
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            {{- include "fleet.labels" $ | nindent 12 }}
+            app.kubernetes.io/component: batch
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "fleet.serviceAccountName" $ }}
+          securityContext:
+            {{- toYaml $.Values.podSecurityContext | nindent 12 }}
+          volumes:
+            {{- include "fleet.writableVolumes" $ | nindent 12 }}
+          containers:
+            - name: batch
+              image: {{ include "fleet.image" $ }}
+              imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+              securityContext:
+                {{- toYaml $.Values.containerSecurityContext | nindent 16 }}
+              env:
+                - name: FLEET_SERVICE_MODULE
+                  value: batch
+                {{- include "fleet.env" $ | nindent 16 }}
+              args:
+                {{- if eq $name "rollup" }}
+                - rollup
+                - --days
+                - {{ $job.days | quote }}
+                {{- else if eq $name "utilisation" }}
+                - utilisation
+                {{- else if eq $name "partitions" }}
+                - partitions
+                - --months-forward
+                - {{ $job.monthsForward | quote }}
+                {{- else if eq $name "reconcile-late" }}
+                - reconcile-late
+                {{- end }}
+              volumeMounts:
+                {{- include "fleet.writableVolumeMounts" $ | nindent 16 }}
+              resources:
+                requests: { cpu: 200m, memory: 256Mi }
+                limits: { cpu: "1", memory: 1Gi }
+{{- end }}
+{{- end }}

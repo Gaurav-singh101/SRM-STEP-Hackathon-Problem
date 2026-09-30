@@ -21,7 +21,7 @@ x-healthcheck-defaults: &hc
 services:
   # --- Kafka, KRaft mode (no ZooKeeper). CLAUDE.md S4. --------------------
   kafka:
-    image: apache/kafka:3.9.0
+    image: apache/kafka:3.9.0@sha256:fbc7d7c428e3755cf36518d4976596002477e4c052d1f80b5b9eafd06d0fff2f
     container_name: fleet-kafka
     profiles: [core]
     ports:
@@ -61,7 +61,7 @@ services:
   # not depend on host tooling either. Idempotent: --if-not-exists, so re-running
   # `up` is safe.
   kafka-init:
-    image: apache/kafka:3.9.0
+    image: apache/kafka:3.9.0@sha256:fbc7d7c428e3755cf36518d4976596002477e4c052d1f80b5b9eafd06d0fff2f
     container_name: fleet-kafka-init
     profiles: [core]
     depends_on:
@@ -93,7 +93,7 @@ services:
 
   # --- PostgreSQL: relational core, 3NF + rollups (CLAUDE.md S8) ----------
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     container_name: fleet-postgres
     profiles: [core]
     ports:
@@ -125,7 +125,7 @@ services:
 
   # --- MongoDB: raw/enriched telemetry, TTL hot tier (CLAUDE.md S8) -------
   mongo:
-    image: mongo:7.0
+    image: mongo:7.0@sha256:9854f7139445d766a9523571d6f047530c45547460ffcf8259eb2bf4264632ca
     container_name: fleet-mongo
     profiles: [core]
     ports:
@@ -140,7 +140,7 @@ services:
   # Pinned to 7.2 deliberately (ADR-0002 / CLAUDE.md S4): 7.4 changed licence.
   # Do NOT bump this tag without an ADR.
   redis:
-    image: redis:7.2-alpine
+    image: redis:7.2-alpine@sha256:29e8589c3f9ba699b5f7aa4b3c7733c58852a3626439e619aa0ee78de08c6ca0
     container_name: fleet-redis
     profiles: [core]
     ports:

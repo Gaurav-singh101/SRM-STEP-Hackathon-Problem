@@ -1,0 +1,11 @@
+apiVersion: v2
+name: fleet-platform
+description: Fleet Fuel, Idling & Utilisation Cost Intelligence Platform
+type: application
+version: 1.0.0
+# The application version, not the chart version. Bumped when the images are.
+appVersion: "1.0.0"
+keywords:
+  - telematics
+  - fleet
+  - idle-cost
