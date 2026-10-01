@@ -121,7 +121,8 @@ sql-plans: ## Before/after EXPLAIN (ANALYZE, BUFFERS) into docs/evidence/sql/
 #                       packages, and the build chain is exactly what STRIDE E6 is about
 # Both scopes are written, because the default-scope report alone reads as covering far
 # more than it does.
-TRIVY_IMAGE ?= aquasec/trivy:latest
+TRIVY_IMAGE   ?= aquasec/trivy:latest
+SEMGREP_IMAGE ?= semgrep/semgrep:latest
 TRIVY_SKIP  ?= .venv,web/node_modules,.git,web/dist,**/__pycache__
 TRIVY_RUN    = docker run --rm -v "$(CURDIR):/src" -v trivy-cache:/root/.cache $(TRIVY_IMAGE)
 
@@ -134,6 +135,10 @@ security: ## Dependency, secret and config scans into docs/evidence/security/
 	$(TRIVY_RUN) fs --quiet --scanners vuln,secret,misconfig --include-dev-deps \
 		--severity CRITICAL,HIGH,MEDIUM,LOW --skip-dirs "$(TRIVY_SKIP)" \
 		--format json --output /src/docs/evidence/security/trivy-fs-with-dev.json /src
+	docker run --rm -v "$(CURDIR):/src" -w /src $(SEMGREP_IMAGE) \
+		semgrep scan --config=p/python --config=p/secrets --config=p/owasp-top-ten \
+		--json --output=/src/docs/evidence/security/semgrep.json \
+		--exclude=.venv --exclude=node_modules --exclude=dist --metrics=off
 	$(UV) run python -m tests.tools.scan_summary
 
 .PHONY: chaos

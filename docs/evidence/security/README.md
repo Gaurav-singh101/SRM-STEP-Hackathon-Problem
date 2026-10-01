@@ -61,9 +61,7 @@ as a gap rather than done.
 
 Stated, because an evidence directory invites the reading that everything was checked.
 
-- **No SAST yet.** Semgrep is not installed locally and has not been run here. CI runs it
-  as a GitHub Action, but those artefacts are not committed, so there is no SAST evidence in
-  this repository at the time of writing.
+- **DAST** is still absent. OWASP ZAP against the running API has not been run.
 - **No DAST.** OWASP ZAP against the running API has not been run.
 - **No container image scan.** These are filesystem and configuration scans of the source
   tree. The built images have not been scanned.
@@ -92,3 +90,28 @@ as an unknown error.
 
 The vulnerability database is ~118 MB and is cached in the named volume `trivy-cache`, so
 only the first run downloads it.
+
+## Semgrep (SAST)
+
+| Field | Value |
+|---|---|
+| Date (UTC) | 2026-10-01 |
+| Rulesets | `p/python`, `p/secrets`, `p/owasp-top-ten` |
+| Rules run | 377 over 163 files |
+| Result | **0 findings** |
+| Raw report | `semgrep.json` |
+
+**It found something real on the first run: 12 findings, all
+`github-actions-mutable-action-tag`.** Every `uses:` in the CI workflow referenced a mutable
+tag - `actions/checkout@v4`, `astral-sh/setup-uv@v5` and so on. A tag can be silently
+repointed by whoever owns the action, so the code running with this repository's credentials
+can change with nothing in any diff to show it.
+
+That is exactly **STRIDE E6, CI supply-chain compromise**, which `docs/STRIDE.md` listed as
+an open item. It is also the same defect that had already been fixed one file over: the
+docker-compose images were pinned to digests for precisely this reason, and the lesson was
+not carried across to the workflow.
+
+All 12 are now pinned to commit SHAs with the version kept as a trailing comment, and the
+re-scan returns 0 findings. The CI step no longer carries `continue-on-error`, so a future
+finding fails the build rather than being a line nobody reads.

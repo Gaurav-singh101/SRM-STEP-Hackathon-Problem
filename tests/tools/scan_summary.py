@@ -105,6 +105,41 @@ def _coverage(report: dict[str, Any]) -> list[tuple[str, int, str]]:
     return rows
 
 
+def _print_semgrep(path: Path) -> list[Finding]:
+    """Semgrep findings, folded into the same verdict as the Trivy ones.
+
+    Separate reader because the JSON shape differs, but the same Finding type and the same
+    exit code: a SAST report that only gets printed is a report nobody acts on. Semgrep's
+    own severities are ERROR/WARNING/INFO, mapped onto the Trivy scale so one rule decides
+    the build rather than two.
+    """
+    if not path.exists():
+        print(f"\nsemgrep: MISSING ({path.name}) - run `make security`")
+        return []
+
+    report = json.loads(path.read_text(encoding="utf-8"))
+    results = report.get("results") or []
+    scanned = len((report.get("paths") or {}).get("scanned") or [])
+    print(f"\nsemgrep SAST  [{path.name}, {scanned} file(s) scanned]")
+
+    mapping = {"ERROR": "HIGH", "WARNING": "MEDIUM", "INFO": "LOW"}
+    found = []
+    for result in results:
+        extra = result.get("extra") or {}
+        found.append(
+            Finding(
+                severity=mapping.get(str(extra.get("severity", "INFO")), "LOW"),
+                kind="sast",
+                target=f"{result.get('path')}:{(result.get('start') or {}).get('line')}",
+                identifier=str(result.get("check_id", "?")).split(".")[-1],
+                detail=str(extra.get("message", "")).strip().splitlines()[0][:140],
+            )
+        )
+    if not found:
+        print("  no findings")
+    return found
+
+
 def _print_report(path: Path, scope: str) -> list[Finding]:
     if not path.exists():
         print(f"  {scope}: MISSING ({path.name}) - run `make security`")
@@ -127,13 +162,14 @@ def main() -> int:
     print("Trivy scan summary")
     print("=" * 70)
 
+    semgrep = _print_semgrep(EVIDENCE_DIR / "semgrep.json")
     default = _print_report(EVIDENCE_DIR / "trivy-fs.json", "runtime dependencies only")
     full = _print_report(EVIDENCE_DIR / "trivy-fs-with-dev.json", "runtime AND dev dependencies")
 
     # The full-scope report decides the outcome. The default-scope one is kept for
     # comparison but must never be the thing a build passes on, because it silently
     # excludes npm dev dependencies.
-    findings = full or default
+    findings = (full or default) + semgrep
     if not findings:
         print("\nno findings in either scope")
         return 0

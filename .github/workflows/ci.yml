@@ -1,3 +1,16 @@
+# CI pipeline.
+#
+# Every `uses:` is pinned to a COMMIT SHA, with the version kept as a trailing comment.
+# A tag like @v4 is mutable - the action's owner can repoint it, so the code running with
+# this repository's credentials can change with nothing in any diff to show it. That is
+# STRIDE E6, CI supply-chain compromise, and Semgrep's
+# github-actions-mutable-action-tag flagged all 12 references.
+#
+# Caught only after docker-compose images had already been pinned to digests for exactly
+# the same reason: the lesson was applied to one file and not the other.
+#
+# To update an action: change the SHA and the comment together. `gh api
+# repos/<owner>/<repo>/commits/<tag>` resolves one.
 # ---------------------------------------------------------------------------
 # CI on every push (hackathon PDF S12: "All suites should run automatically in
 # CI on every push"). Fails on lint, type or coverage regressions.
@@ -30,10 +43,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -74,7 +87,7 @@ jobs:
 
       - name: Upload coverage evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: coverage-${{ github.sha }}
           path: docs/evidence/coverage/
@@ -82,7 +95,7 @@ jobs:
 
       - name: Upload acceptance evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: acceptance-${{ github.sha }}
           path: docs/evidence/acceptance/
@@ -93,10 +106,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -116,19 +129,27 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
+      # continue-on-error is gone deliberately. It made a SAST finding indistinguishable
+      # from a clean scan for anyone reading the run summary - the same false green the
+      # `|| true` on the scan commands used to produce. The ruleset now matches what
+      # `make security` runs locally, so a developer and CI cannot disagree about whether
+      # the tree is clean.
+      #
+      # This scan currently passes with 0 findings, after it caught all 12 `uses:`
+      # references pointing at mutable action tags - which is STRIDE E6 and is why every
+      # one of them is now a commit SHA.
       - name: Semgrep SAST
-        uses: semgrep/semgrep-action@v1
+        uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d  # v1
         with:
           config: >-
-            p/default
             p/python
             p/secrets
-        continue-on-error: true
+            p/owasp-top-ten
 
       - name: Trivy filesystem and secret scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2  # v0.28.0
         with:
           scan-type: fs
           scanners: vuln,secret,misconfig
@@ -139,7 +160,7 @@ jobs:
 
       - name: Upload scan results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: security-scans-${{ github.sha }}
           path: "*.sarif"
@@ -150,8 +171,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true

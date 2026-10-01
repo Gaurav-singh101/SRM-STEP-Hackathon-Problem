@@ -127,11 +127,16 @@ def test_the_full_scope_report_decides_the_outcome(
 def test_a_missing_report_is_stated_rather_than_treated_as_clean(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """ "Never scanned" must not present as "scanned and found nothing"."""
+    """ "Never scanned" must not present as "scanned and found nothing".
+
+    Three reports now: both Trivy scopes and Semgrep. The count is asserted rather than
+    merely "> 0" because a new report added without its own missing-file branch would
+    otherwise pass silently - which is how an unscanned tool starts looking clean.
+    """
     monkeypatch.setattr(scan_summary, "EVIDENCE_DIR", tmp_path)
     scan_summary.main()
     printed = capsys.readouterr().out
-    assert printed.count("MISSING") == 2
+    assert printed.count("MISSING") == 3
     assert "run `make security`" in printed
 
 
@@ -148,3 +153,64 @@ def test_coverage_counts_are_printed_so_a_clean_result_can_be_read_in_proportion
     printed = capsys.readouterr().out
     assert "83 packages" in printed
     assert "355 packages" in printed
+
+
+def test_a_semgrep_error_finding_fails_the_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Semgrep ERROR maps to HIGH, which blocks.
+
+    The CI step used to carry `continue-on-error: true`, which made a SAST finding
+    indistinguishable from a clean scan in the run summary. This is the assertion that
+    keeps it distinguishable.
+    """
+    clean = _report()
+    (tmp_path / "semgrep.json").write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "check_id": "rules.python.lang.security.dangerous-exec",
+                        "path": "services/api/api/main.py",
+                        "start": {"line": 42},
+                        "extra": {"severity": "ERROR", "message": "dangerous exec"},
+                    }
+                ],
+                "paths": {"scanned": ["a.py"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write(tmp_path, monkeypatch, **{"trivy-fs": clean, "trivy-fs-with-dev": clean})
+    assert scan_summary.main() == 1
+
+
+def test_a_semgrep_warning_is_reported_without_failing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """WARNING maps to MEDIUM: printed every run, does not block.
+
+    This is the severity the 12 mutable-action-tag findings carried. They were fixed rather
+    than accepted, but the mapping is what decided whether the build stopped.
+    """
+    clean = _report()
+    (tmp_path / "semgrep.json").write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "check_id": "rules.github-actions-mutable-action-tag",
+                        "path": ".github/workflows/ci.yml",
+                        "start": {"line": 33},
+                        "extra": {"severity": "WARNING", "message": "mutable tag"},
+                    }
+                ],
+                "paths": {"scanned": ["ci.yml"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write(tmp_path, monkeypatch, **{"trivy-fs": clean, "trivy-fs-with-dev": clean})
+    assert scan_summary.main() == 0
+    printed = capsys.readouterr().out
+    assert "mutable-action-tag" in printed

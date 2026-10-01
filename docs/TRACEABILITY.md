@@ -89,7 +89,7 @@ section. `Dn` = open decision.
 | PDF-13 | Demo video (5 min) | - | **NOT PRODUCED** - stated in SOLUTION.md S13 | **Open** |
 | PDF-12 | Dependency, secret and config scans | `make security`, `tests/tools/scan_summary.py` | `docs/evidence/security/` — 83 Python + 355 npm packages, 0 vulns, 1 LOW misconfig | Done |
 | PDF-12 | A scan failure actually fails the build | `scan_summary.py` exit code | `test_scan_summary.py` (7 cases) | Done |
-| PDF-12 | SAST (Semgrep) evidence committed | `docs/evidence/security/` | CI runs it; artefacts **not committed**, no local evidence yet | **Open** |
+| PDF-12 | SAST (Semgrep) | `make security`, CI gate | **0 findings** over 377 rules / 163 files; caught 12 mutable CI action tags (STRIDE E6), now SHA-pinned | Done |
 | PDF-12 | DAST (OWASP ZAP) and built-image scan | - | **Not run** | **Open** |
 | PDF-16, CM-9 | SQL before/after query plans with EXPLAIN (ANALYZE, BUFFERS) | `tests/tools/sql_plans.py` | `docs/evidence/sql/query-plans.md` | Done |
 | CM-9 | Leaderboard reads the daily rollup, not raw events | `repository.py::idle_cost_leaderboard` | ~3x faster, non-overlapping ranges over two nine-sample runs; scales with vehicle-days not events | Done |
